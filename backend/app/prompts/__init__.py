@@ -1,7 +1,3 @@
-from app.prompts.intent_classification import SYSTEM_PROMPT as INTENT_CLASSIFICATION_SYSTEM_PROMPT
-from app.prompts.intent_classification import USER_PROMPT as INTENT_CLASSIFICATION_USER_PROMPT
-from app.prompts.file_generation import SYSTEM_PROMPT as FILE_GENERATION_SYSTEM_PROMPT
-from app.prompts.file_generation import USER_PROMPT as FILE_GENERATION_USER_PROMPT
 from app.prompts.chat import SYSTEM_PROMPT as CHAT_SYSTEM_PROMPT
 from app.prompts.summarization import SYSTEM_PROMPT as SUMMARIZATION_SYSTEM_PROMPT
 from app.prompts.summarization import USER_PROMPT as SUMMARIZATION_USER_PROMPT
@@ -17,10 +13,6 @@ from app.prompts.profile_candidate import SYSTEM_PROMPT as PROFILE_CANDIDATE_SYS
 from app.prompts.profile_candidate import USER_PROMPT as PROFILE_CANDIDATE_USER_PROMPT
 
 __all__ = [
-    "INTENT_CLASSIFICATION_SYSTEM_PROMPT",
-    "INTENT_CLASSIFICATION_USER_PROMPT",
-    "FILE_GENERATION_SYSTEM_PROMPT",
-    "FILE_GENERATION_USER_PROMPT",
     "CHAT_SYSTEM_PROMPT",
     "SUMMARIZATION_SYSTEM_PROMPT",
     "SUMMARIZATION_USER_PROMPT",

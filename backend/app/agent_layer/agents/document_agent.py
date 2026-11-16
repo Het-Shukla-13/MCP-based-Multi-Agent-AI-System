@@ -31,6 +31,13 @@ When answering:
 - Be precise and do not hallucinate details not found in the text.
 
 You MUST use provided context (especially parsed text from PDF/DOCX files in RAG CONTEXT) if present.
+
+TOOLS:
+- list_files, then search_files for specific questions or read_file for summaries
+  and structure. Quote section names when relevant.
+- When the user asks for a downloadable file (report, notes, CSV, JSON, PDF...), write the
+  complete content yourself, call create_file, then share the returned download_url as a
+  Markdown link [filename](download_url).
 """,
         )
 

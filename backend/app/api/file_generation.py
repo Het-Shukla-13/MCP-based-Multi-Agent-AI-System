@@ -11,90 +11,10 @@ from fastapi.responses import FileResponse, HTMLResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.database import get_db
-from app.schemas.file_generation import (
-    FileGenerationPreviewResponse,
-    FileGenerationRequest,
-    FileGenerationResultResponse,
-    GeneratedFileRead,
-)
 from app.services.file_generation.file_renderer import get_mime_type
-from app.services.file_generation.file_generation_service import (
-    generate_file_artifact,
-    # preview_file_artifact,
-)
 from app.crud.file import get_file
 
 router = APIRouter(prefix="/files", tags=["File Generation"])
-
-
-# @router.post("/generate/preview", response_model=FileGenerationPreviewResponse)
-# async def preview_generation(
-#     payload: FileGenerationRequest,
-#     db: AsyncSession = Depends(get_db),
-# ):
-#     result = await preview_file_artifact(
-#         db,
-#         user_id=payload.user_id,
-#         conversation_id=payload.conversation_id,
-#         prompt=payload.prompt,
-#         output_format=payload.output_format,
-#         file_ids=payload.file_ids,
-#         explicit_action=payload.explicit_action,
-#     )
-#     decision = result["decision"]
-#     return {
-#         "decision": {
-#             "should_generate": decision.should_generate,
-#             "format": decision.format,
-#             "confidence": decision.confidence,
-#             "reason": decision.reason,
-#             "source": decision.source,
-#         },
-#         "document": result["document"],
-#         "preview": result["preview"],
-#     }
-
-
-# @router.post("/generate", response_model=FileGenerationResultResponse)
-# async def generate(
-#     payload: FileGenerationRequest,
-#     db: AsyncSession = Depends(get_db),
-# ):
-#     outcome = await generate_file_artifact(
-#         db,
-#         user_id=payload.user_id,
-#         conversation_id=payload.conversation_id,
-#         prompt=payload.prompt,
-#         output_format=payload.output_format,
-#         file_ids=payload.file_ids,
-#         explicit_action=payload.explicit_action,
-#     )
-
-#     if outcome.rendered_file is None:
-#         raise HTTPException(status_code=500, detail="Generated file metadata is missing.")
-#     if outcome.file_record is None:
-#         raise HTTPException(status_code=500, detail="Generated file record is missing.")
-
-#     file_read = GeneratedFileRead.model_validate(outcome.file_record)
-#     return {
-#         "decision": {
-#             "should_generate": outcome.decision.should_generate,
-#             "format": outcome.decision.format,
-#             "confidence": outcome.decision.confidence,
-#             "reason": outcome.decision.reason,
-#             "source": outcome.decision.source,
-#         },
-#         "preview": {
-#             "filename": outcome.rendered_file.filename,
-#             "file_type": outcome.rendered_file.mime_type,
-#             "format": outcome.decision.format,
-#             "preview_text": outcome.rendered_file.preview_text,
-#             "warnings": outcome.warnings,
-#         },
-#         "download_url": outcome.download_url,
-#         "file": file_read.model_dump(),
-#         "assistant_message_id": getattr(outcome.assistant_message, "id", None),
-#     }
 
 
 @router.get("/generated/{file_id}/download")

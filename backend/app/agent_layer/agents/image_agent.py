@@ -32,6 +32,12 @@ When answering:
 - Acknowledge your limitations if you cannot see the image clearly.
 
 You MUST use provided context (especially attached image data or descriptions in RAG CONTEXT) if present.
+
+TOOLS:
+- describe_image for any question about an uploaded image (contents, text/OCR, charts).
+- generate_image when the user asks to create/draw an image: write a rich, specific
+  English prompt; then show the result as a Markdown image ![description](download_url).
+- Never claim to see an image you did not inspect with describe_image.
 """,
         )
 

@@ -32,7 +32,15 @@ from app.agent_layer.agents.general_agent import GeneralAgent
 from app.agent_layer.agents.image_agent import ImageAgent
 from app.agent_layer.agents.research_agent import ResearchAgent
 from app.agent_layer.core import agent_registry
-from app.agent_layer.core.base import APP_NAME, BaseAgent, StatusCallback, emit_status, emit_tool_events
+from app.agent_layer.core.base import (
+    APP_NAME,
+    BaseAgent,
+    StatusCallback,
+    collect_generated_files,
+    emit_status,
+    emit_tool_events,
+    is_retryable_provider_error,
+)
 from app.agent_layer.schemas import AgentContext, AgentResponse
 from app.core.config import settings
 
@@ -77,11 +85,6 @@ Recent conversation (for follow-up detection only):
 """
 
 
-def _is_quota_error(exc: Exception) -> bool:
-    text = str(exc).lower()
-    return "429" in text or "resource_exhausted" in text or "quota" in text
-
-
 class RootAgent:
 
     @property
@@ -121,9 +124,9 @@ class RootAgent:
                 return await self._delegate(context, router_model, agent_model, emit, on_status)
             except Exception as exc:
                 last_exc = exc
-                if not _is_quota_error(exc):
+                if not is_retryable_provider_error(exc):
                     break
-                logger.warning("Delegation quota error on %s/%s; trying fallback", router_model, agent_model)
+                logger.warning("Delegation failed on %s/%s (retryable); trying fallbacks", router_model, agent_model)
         raise AgentExecutionError(ROOT_NAME, last_exc)
 
     async def _delegate(self, context, router_model, agent_model, emit, on_status) -> AgentResponse:
@@ -143,6 +146,7 @@ class RootAgent:
         answered_by: str | None = None
         transferred_to: str | None = None
         texts: dict[str, str] = {}
+        generated: list[str] = []
 
         async for event in runner.run_async(
             user_id=context.user_id,
@@ -150,6 +154,7 @@ class RootAgent:
             new_message=Content(role="user", parts=[Part.from_text(text=context.user_message)]),
         ):
             await emit_tool_events(on_status, event)
+            collect_generated_files(event, generated)
             parts = (event.content.parts if event.content and event.content.parts else [])
             for part in parts:
                 call = getattr(part, "function_call", None)
@@ -174,4 +179,5 @@ class RootAgent:
             content=texts[answered_by].strip(),
             agent_name=answered_by,
             selected_agent=answered_by,
+            generated_file_ids=generated,
         )

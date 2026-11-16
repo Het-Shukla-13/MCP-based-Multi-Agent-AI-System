@@ -31,6 +31,16 @@ When answering:
 - If you lack current information, acknowledge it (until web search tools are fully integrated).
 
 You MUST use provided context (especially attached documents in RAG CONTEXT) to ground your research.
+
+TOOLS:
+- web_search for current or factual information (news=true for recent events),
+  then fetch_page on the 1-3 most relevant results to read them properly.
+- search_files when the user's own documents are relevant.
+- If web search is unavailable, say so and answer from your own knowledge.
+- When the user asks for a downloadable file (report, notes, CSV, JSON, PDF...), write the
+  complete content yourself, call create_file, then share the returned download_url as a
+  Markdown link [filename](download_url).
+OUTPUT: a structured answer, then a "Sources" list of the URLs you actually used.
 """,
         )
 

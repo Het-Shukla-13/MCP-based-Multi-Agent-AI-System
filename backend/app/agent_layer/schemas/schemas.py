@@ -45,6 +45,8 @@ class AgentResponse(BaseModel):
     selected_agent: Optional[str] = None   # Echo back the agent chosen for this turn
     agent_name: str
     content: Optional[str] = None  # LLM output content
+    # Files created by tools during this turn (attached to the assistant message).
+    generated_file_ids: list[str] = Field(default_factory=list)
 
 
 class AgentState(BaseModel):
