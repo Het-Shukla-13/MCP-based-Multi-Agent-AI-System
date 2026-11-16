@@ -20,6 +20,12 @@ class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
     expires_in: int  # seconds
+    refresh_token: str
+    refresh_expires_in: int  # seconds
+
+
+class RefreshRequest(BaseModel):
+    refresh_token: str = Field(min_length=20, max_length=200)
 
 
 class UserUpdate(BaseModel):
