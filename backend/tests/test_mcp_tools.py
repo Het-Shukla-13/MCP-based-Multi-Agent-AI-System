@@ -55,3 +55,14 @@ def test_compatible_more_detailed_memory_is_treated_as_refinement(monkeypatch):
         similar_matches=[{"memory": old, "distance": 0.22}],
     ))
     assert matched is old and comparison["relationship"] == "refinement"
+
+
+def test_profile_rebuild_drops_all_memory_derived_items():
+    from app.services.user_profile.user_profile_cache_service import _message_derived_items
+
+    items = [
+        {"value": "old wording", "metadata": {"memory_id": "m1"}},   # edited memory: recompute
+        {"value": "gone", "metadata": {"memory_id": "m2"}},          # deleted memory: drop
+        {"value": "from a message", "metadata": {}},                 # no memory: keep
+    ]
+    assert [i["value"] for i in _message_derived_items(items)] == ["from a message"]
