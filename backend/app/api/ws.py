@@ -1,6 +1,7 @@
 import json
 import logging
 from time import perf_counter
+from app.agent_layer.core import agent_registry
 from app.services.message.message_service import send_message_from_payload
 from app.schemas.message import MessageRead
 from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
@@ -15,14 +16,6 @@ from fastapi.encoders import jsonable_encoder
 
 logger = logging.getLogger(__name__)
 
-VALID_AGENTS = [
-    {"name": "general",  "label": "General Assistant", "description": "Default conversational agent"},
-    {"name": "code",     "label": "Code Agent",         "description": "Code analysis and generation"},
-    {"name": "data",     "label": "Data Agent",         "description": "CSV / Excel analysis"},
-    {"name": "research", "label": "Research Agent",     "description": "Web search and synthesis"},
-    {"name": "document", "label": "Document Agent",     "description": "PDF / DOCX analysis"},
-    {"name": "image",    "label": "Image Agent",        "description": "Image understanding and generation"},
-]
 
 router = APIRouter(
     prefix="/ws",
@@ -32,8 +25,13 @@ router = APIRouter(
 
 @router.get("/agents")
 async def list_agents():
-    """Return the list of available agents so the frontend can mirror VALID_AGENTS."""
-    return {"agents": VALID_AGENTS}
+    """Agents straight from the registry: the same descriptions the root agent routes on."""
+    return {
+        "agents": [
+            {"name": agent.name, "label": agent.label, "description": agent.description}
+            for agent in agent_registry.get_all().values()
+        ]
+    }
 
 
 @router.websocket("/{conversation_id}")
@@ -74,11 +72,20 @@ async def websocket_endpoint(websocket: WebSocket, conversation_id: UUID, db: As
             try:
                 payload = json.loads(data)
                 process_started_at = perf_counter()
+
+                # Live progress: "routing" -> "working: code" before the reply arrives.
+                async def push_status(event: dict, _cid=conversation_id) -> None:
+                    await manager.send_to_conversation(
+                        {"type": "agent_status", "data": {"conversation_id": str(_cid), **event}},
+                        _cid,
+                    )
+
                 result = await send_message_from_payload(
                     db,
                     conversation_id,
                     payload,
                     authenticated_user_id,
+                    on_status=push_status,
                 )
                 logger.info(
                     "WebSocket timing | stage=process_message | conversation_id=%s | duration_min=%.4f",
@@ -100,6 +107,7 @@ async def websocket_endpoint(websocket: WebSocket, conversation_id: UUID, db: As
                             ).model_dump(),
                             "active_agent": result.get("active_agent", "general"),
                             "agent_switched": result.get("agent_switched", False),
+                            "error": result.get("error", False),
                         }
                     }),
                     conversation_id

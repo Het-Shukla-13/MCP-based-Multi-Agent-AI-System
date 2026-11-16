@@ -8,6 +8,10 @@ from app.agent_layer.schemas import AgentContext
 class GeneralAgent(BaseAgent):
 
     name = "general"
+    label = "General Assistant"
+    description = (
+        "Default conversational agent: greetings, small talk, general questions, explanations and anything that does not clearly fit another agent."
+    )
 
     def _build_adk_agent(self) -> LlmAgent:
         return LlmAgent(

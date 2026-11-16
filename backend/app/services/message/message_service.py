@@ -24,11 +24,17 @@ from app.services.file_generation.intent_router import (
     detect_generation_intent,
 )
 from app.services.file_generation.file_generation_service import generate_file_artifact
-from app.agent_layer.agents.root_agent import RootAgent
+from app.agent_layer.agents.root_agent import AgentExecutionError, RootAgent, StatusCallback
+from app.agent_layer.core.mentions import parse_agent_mention
 from app.agent_layer.schemas import AgentContext, HistoryMessage
 from app.agent_layer.core.state import get_agent_state, set_active_agent
 
 root_agent = RootAgent()
+
+AGENT_ERROR_REPLY = (
+    "Sorry, I couldn't complete that request: the AI provider failed or is rate-limited "
+    "right now. Please try again in a moment."
+)
 
 EMPTY_RESPONSE_FALLBACK = (
     "I lost the thread for a moment. Please repeat the last line you want me to continue from, "
@@ -144,6 +150,7 @@ async def generate_ai_response(
 def build_ai_message_payload(
     user_message: Message,
     ai_content: str,
+    agent_name: str | None = None,
 ) -> MessageCreate:
     # Uploaded files belong to the USER message. Passing them here made
     # _attach_files_to_message re-point file.message_id to the AI reply.
@@ -153,6 +160,7 @@ def build_ai_message_payload(
         content=ai_content,
         role="assistant",
         token_count=None,
+        agent_name=agent_name,
         file_ids=[],
     )
 
@@ -192,6 +200,7 @@ async def send_message(
     payload: MessageCreate,
     rag_context: str = "",
     selected_agent: str | None = None,
+    on_status: StatusCallback | None = None,
 ) -> dict[str, Message]:
     turn_started_at = perf_counter()
     payload.token_count = get_message_token_count(payload)
@@ -254,15 +263,15 @@ async def send_message(
     agent_state = get_agent_state(conversation.convo_metadata)
     previous_active_agent = agent_state.get("active_agent", "general")
 
-    # `selected_agent` (from the frontend) is only set when the user explicitly
-    # @mentioned an agent.  In that case we pass it through so root_agent bypasses
-    # LLM routing.  When it is None we pass None so the LLM router runs freely.
-    # We NEVER fall back to `previous_active_agent` here — that would permanently
-    # short-circuit the LLM router because the fallback is always a valid agent name.
-    explicit_agent = selected_agent if selected_agent else None
+    # Never default explicit_agent to previous_active_agent: that would bypass routing
+    # forever. Stickiness is a *hint* to the router instead (previous_agent).
+    # Explicit choice: UI pick first, otherwise an "@agent" typed in the message.
+    # The stored user message keeps the mention; the agent gets the text without it.
+    mentioned_agent, agent_input = parse_agent_mention(payload.content, root_agent.valid_agents)
+    explicit_agent = selected_agent if selected_agent in root_agent.valid_agents else mentioned_agent
 
     logger.info(
-        "Agent routing | explicit_agent=%s | previous_active_agent=%s | mode=%s",
+        "Agent routing | explicit_agent={} | previous_active_agent={} | mode={}",
         explicit_agent,
         previous_active_agent,
         "explicit" if explicit_agent else "llm_routing",
@@ -280,7 +289,7 @@ async def send_message(
     agent_context = AgentContext(
         user_id=str(payload.user_id),
         conversation_id=str(payload.conversation_id),
-        user_message=payload.content,
+        user_message=agent_input,
         selected_agent=explicit_agent,          # None → LLM router picks; string → forced
         previous_agent=previous_active_agent,   # stickiness hint for the LLM router
         history=history,
@@ -293,11 +302,20 @@ async def send_message(
     )
 
     ai_response_started_at = perf_counter()
-    agent_response = await root_agent.run(agent_context)
-    ai_content = agent_response.content
-    
-    updated_metadata = set_active_agent(conversation.convo_metadata, agent_response.agent_name)
-    await update_conversation_metadata(db, payload.conversation_id, updated_metadata)
+    agent_error = False
+    try:
+        agent_response = await root_agent.run(agent_context, on_status=on_status)
+        answered_by = agent_response.agent_name
+        ai_content = agent_response.content
+        updated_metadata = set_active_agent(conversation.convo_metadata, answered_by)
+        await update_conversation_metadata(db, payload.conversation_id, updated_metadata)
+    except AgentExecutionError as exc:
+        # Keep the conversation consistent (every user message gets a reply) and
+        # tell the user plainly, instead of a generic socket error and a dangling question.
+        logger.exception("Agent execution failed | agent={}", exc.agent_name)
+        agent_error = True
+        answered_by = exc.agent_name
+        ai_content = AGENT_ERROR_REPLY
     
     logger.info(
             "Chat timing | stage=generate_ai_response | duration_min={}",
@@ -306,7 +324,7 @@ async def send_message(
     if not ai_content:
         ai_content = EMPTY_RESPONSE_FALLBACK
 
-    ai_message = build_ai_message_payload(user_message, ai_content)
+    ai_message = build_ai_message_payload(user_message, ai_content, agent_name=answered_by)
     ai_message.token_count = get_message_token_count(ai_message)
     create_ai_started_at = perf_counter()
     ai_message = await create_message(db, ai_message)
@@ -317,10 +335,11 @@ async def send_message(
         
 
     schedule_maintenance_started_at = perf_counter()
-    schedule_memory_maintenance_pipeline(
-        user_id=payload.user_id,
-        conversation_id=payload.conversation_id,
-    )
+    if not agent_error:  # don't mine an error reply for memories
+        schedule_memory_maintenance_pipeline(
+            user_id=payload.user_id,
+            conversation_id=payload.conversation_id,
+        )
     logger.info(
         "Chat timing | stage=schedule_memory_maintenance | duration_min={}",
         elapsed_minutes(schedule_maintenance_started_at),
@@ -330,13 +349,12 @@ async def send_message(
         "Chat timing | stage=total_turn | duration_min={}",
         elapsed_minutes(turn_started_at),
     )
-    agent_switched = agent_response.agent_name != previous_active_agent
-
     return {
         "user_message": user_message,
         "ai_message": ai_message,
-        "active_agent": agent_response.agent_name,
-        "agent_switched": agent_switched,
+        "active_agent": answered_by,
+        "agent_switched": (not agent_error) and answered_by != previous_active_agent,
+        "error": agent_error,
     }
     
 
@@ -346,6 +364,7 @@ async def send_message_from_payload(
     conversation_id,
     payload: dict,
     authenticated_user_id,
+    on_status: StatusCallback | None = None,
 )-> dict[str, Message]:
     request_started_at = perf_counter()
     generation_decision = detect_generation_intent(
@@ -415,6 +434,7 @@ async def send_message_from_payload(
         message_payload,
         rag_context=rag_context,
         selected_agent=payload.get("selected_agent"),
+        on_status=on_status,
     )
     logger.info(
         "Chat timing | stage=send_message_from_payload_total | duration_min={}",

@@ -8,6 +8,10 @@ from app.agent_layer.schemas import AgentContext
 class CodeAgent(BaseAgent):
 
     name = "code"
+    label = "Code Agent"
+    description = (
+        "Writing, explaining, reviewing and debugging source code; programming questions; uploaded code files (.py, .js, .ts, ...)."
+    )
 
     def _build_adk_agent(self) -> LlmAgent:
         return LlmAgent(

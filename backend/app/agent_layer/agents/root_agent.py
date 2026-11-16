@@ -1,63 +1,184 @@
-from app.agent_layer.schemas import AgentContext, AgentResponse
-from app.agent_layer.core import agent_registry
-from app.agent_layer.core.selector import AgentSelector
-from app.agent_layer.agents.general_agent import GeneralAgent
+"""
+Root agent: real ADK multi-agent delegation.
+
+Each request builds a fresh tree:
+
+    root (ROUTER_MODEL, no answering, only routing)
+     ├── general   ┐
+     ├── code      │  per-request LlmAgents with this user's context
+     ├── data      │  (BaseAgent._build_request_agent)
+     ├── research  │
+     ├── document  │
+     └── image     ┘
+
+ADK gives the root a built-in `transfer_to_agent(agent_name)` tool and lists each
+sub-agent's `description` in its prompt. The root's model picks one, ADK hands the
+turn over, and the sub-agent answers. Every ADK event has an `author`, which tells
+us which agent produced the reply.
+
+An explicit @mention skips the root entirely (one model call instead of two).
+"""
+
+import logging
+from collections.abc import Awaitable, Callable
+
+from google.adk.agents.llm_agent import LlmAgent
+from google.adk.runners import Runner
+from google.adk.sessions import InMemorySessionService
+from google.genai.types import Content, Part
+
 from app.agent_layer.agents.code_agent import CodeAgent
 from app.agent_layer.agents.data_agent import DataAgent
-from app.agent_layer.agents.research_agent import ResearchAgent
 from app.agent_layer.agents.document_agent import DocumentAgent
+from app.agent_layer.agents.general_agent import GeneralAgent
 from app.agent_layer.agents.image_agent import ImageAgent
-import logging
+from app.agent_layer.agents.research_agent import ResearchAgent
+from app.agent_layer.core import agent_registry
+from app.agent_layer.core.base import APP_NAME, BaseAgent
+from app.agent_layer.schemas import AgentContext, AgentResponse
+from app.core.config import settings
 
-logger = logging.getLogger(__name__)                                               
+logger = logging.getLogger(__name__)
+
+ROOT_NAME = "root"
+DEFAULT_AGENT = "general"
+ROUTER_HISTORY_MESSAGES = 4
+
+# Async callback the caller can pass to receive live status events (WebSocket).
+StatusCallback = Callable[[dict], Awaitable[None]]
+
+for _agent_cls in (GeneralAgent, CodeAgent, DataAgent, ResearchAgent, DocumentAgent, ImageAgent):
+    if not agent_registry.exists(_agent_cls.name):
+        agent_registry.register(_agent_cls())
+
+
+class AgentExecutionError(Exception):
+    """All models failed for this turn; carries the agent that was handling it."""
+
+    def __init__(self, agent_name: str, cause: Exception):
+        super().__init__(f"{agent_name} agent failed: {cause}")
+        self.agent_name = agent_name
+        self.cause = cause
+
+
+def _router_instruction(context: AgentContext, agents: list[BaseAgent]) -> str:
+    recent = "\n".join(
+        f"{m.role.upper()}: {m.content[:300]}" for m in context.history[-ROUTER_HISTORY_MESSAGES:]
+    )
+    names = ", ".join(a.name for a in agents)
+    return f"""You are the ROUTER of a multi-agent assistant. You never answer the user yourself.
+For every message, call transfer_to_agent with exactly one of: {names}.
+
+Rules:
+- Pick the agent whose description best matches what the user is asking for NOW.
+- Follow-ups ("and?", "make it shorter", "add type hints") belong to the agent that
+  handled the previous turn: {context.previous_agent}.
+- Greetings, small talk and anything unclear go to {DEFAULT_AGENT}.
+- Attached files: code files -> code, CSV/XLSX -> data, PDF/DOCX -> document, images -> image.
+
+Recent conversation (for follow-up detection only):
+{recent or "(none)"}
+"""
+
+
+def _is_quota_error(exc: Exception) -> bool:
+    text = str(exc).lower()
+    return "429" in text or "resource_exhausted" in text or "quota" in text
+
 
 class RootAgent:
 
-    VALID_AGENTS = {"general", "code", "research", "data", "document", "image"}
+    @property
+    def valid_agents(self) -> set[str]:
+        return set(agent_registry.list_agents())
 
-    def __init__(self):
-        # ensure all agents are registered
-        if not agent_registry.exists("general"):
-            agent_registry.register(GeneralAgent())
-        if not agent_registry.exists("code"):
-            agent_registry.register(CodeAgent())
-        if not agent_registry.exists("data"):
-            agent_registry.register(DataAgent())
-        if not agent_registry.exists("research"):
-            agent_registry.register(ResearchAgent())
-        if not agent_registry.exists("document"):
-            agent_registry.register(DocumentAgent())
-        if not agent_registry.exists("image"):
-            agent_registry.register(ImageAgent())
+    async def run(
+        self,
+        context: AgentContext,
+        on_status: StatusCallback | None = None,
+    ) -> AgentResponse:
+        async def emit(event: dict) -> None:
+            if on_status is not None:
+                try:
+                    await on_status(event)
+                except Exception:  # a closed socket must never break the turn
+                    logger.warning("Status callback failed", exc_info=True)
 
-    async def run(self, context: AgentContext) -> AgentResponse:
+        # 1) Explicit selection (@mention or UI pick): run that agent directly.
+        if context.selected_agent and context.selected_agent in self.valid_agents:
+            agent = agent_registry.get(context.selected_agent)
+            logger.info("Agent selection | mode=explicit | agent=%s", agent.name)
+            await emit({"status": "working", "agent": agent.name, "mode": "explicit"})
+            try:
+                return await agent.run(context)
+            except Exception as exc:
+                raise AgentExecutionError(agent.name, exc) from exc
 
-        # Trust the explicit agent selection from the frontend (@mention).
-        # Only fall back to LLM routing if no agent was explicitly chosen.
-        if context.selected_agent and context.selected_agent in self.VALID_AGENTS:
-            selected = context.selected_agent
-            logger.info("Agent selection | mode=explicit | agent=%s", selected)
-        else:
-            # LLM supervisor routing: infer the best agent from the message content,
-            # using the previous turn's agent as a stickiness hint.
-            previous_agent = context.previous_agent or "general"
-            logger.info(
-                "Agent selection | mode=llm_routing | previous_agent=%s | message_preview=%s",
-                previous_agent,
-                context.user_message[:80],
+        # 2) ADK delegation through the root agent (primary models, then fallbacks).
+        await emit({"status": "routing", "agent": ROOT_NAME})
+        attempts = [(settings.ROUTER_MODEL, settings.AGENT_MODEL)]
+        if settings.ROUTER_FALLBACK_MODEL or settings.AGENT_FALLBACK_MODEL:
+            attempts.append(
+                (settings.ROUTER_FALLBACK_MODEL or settings.ROUTER_MODEL,
+                 settings.AGENT_FALLBACK_MODEL or settings.AGENT_MODEL)
             )
-            selected = await AgentSelector.select_agent(
-                context.user_message,
-                previous_agent
-            )
-            logger.info("Agent selection | mode=llm_routing | resolved=%s", selected)
 
-        # Ensure the resolved agent is registered and valid
-        if not agent_registry.exists(selected) or selected not in self.VALID_AGENTS:
-            logger.warning("Agent '%s' not found in registry, falling back to general", selected)
-            selected = "general"
-        logger.info("Agent selection | final=%s", selected)
-        agent = agent_registry.get(selected)
-        context.selected_agent = selected
+        last_exc: Exception | None = None
+        for router_model, agent_model in attempts:
+            try:
+                return await self._delegate(context, router_model, agent_model, emit)
+            except Exception as exc:
+                last_exc = exc
+                if not _is_quota_error(exc):
+                    break
+                logger.warning("Delegation quota error on %s/%s; trying fallback", router_model, agent_model)
+        raise AgentExecutionError(ROOT_NAME, last_exc)
 
-        return await agent.run(context)
+    async def _delegate(self, context, router_model, agent_model, emit) -> AgentResponse:
+        agents = [agent_registry.get(name) for name in agent_registry.list_agents()]
+        root = LlmAgent(
+            name=ROOT_NAME,
+            model=router_model,
+            description="Routes each user message to the best specialised agent.",
+            instruction=lambda _ctx, text=_router_instruction(context, agents): text,
+            sub_agents=[a._build_request_agent(context, agent_model) for a in agents],
+        )
+
+        session_service = InMemorySessionService()  # throwaway; our DB is the history
+        session = await session_service.create_session(app_name=APP_NAME, user_id=context.user_id)
+        runner = Runner(agent=root, session_service=session_service, app_name=APP_NAME)
+
+        answered_by: str | None = None
+        transferred_to: str | None = None
+        texts: dict[str, str] = {}
+
+        async for event in runner.run_async(
+            user_id=context.user_id,
+            session_id=session.id,
+            new_message=Content(role="user", parts=[Part.from_text(text=context.user_message)]),
+        ):
+            parts = (event.content.parts if event.content and event.content.parts else [])
+            for part in parts:
+                call = getattr(part, "function_call", None)
+                if call is not None and call.name == "transfer_to_agent":
+                    transferred_to = (call.args or {}).get("agent_name")
+                    await emit({"status": "working", "agent": transferred_to, "mode": "routed"})
+                text = getattr(part, "text", None)
+                if text:
+                    texts[event.author] = texts.get(event.author, "") + text
+                    if event.author != ROOT_NAME:
+                        answered_by = event.author
+
+        if answered_by is None:
+            # The router answered itself or transferred nowhere: let General answer.
+            logger.warning("Root did not delegate (transfer=%s); falling back to %s", transferred_to, DEFAULT_AGENT)
+            await emit({"status": "working", "agent": DEFAULT_AGENT, "mode": "fallback"})
+            context.selected_agent = DEFAULT_AGENT
+            return await agent_registry.get(DEFAULT_AGENT).run(context)
+
+        logger.info("Agent selection | mode=adk_delegation | router=%s | agent=%s", router_model, answered_by)
+        return AgentResponse(
+            content=texts[answered_by].strip(),
+            agent_name=answered_by,
+            selected_agent=answered_by,
+        )

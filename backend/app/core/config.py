@@ -30,6 +30,10 @@ class Settings(BaseSettings):
     # ADK agents (Gemini via google-adk).
     AGENT_MODEL: str = "gemini-3.1-flash-lite"
     AGENT_FALLBACK_MODEL: str | None = "gemini-3.5-flash-lite"
+    # Root agent (routing only). A different model than the agents spreads the
+    # free-tier per-model quota: one chat turn = 1 router call + 1 agent call.
+    ROUTER_MODEL: str = "gemini-3.5-flash-lite"
+    ROUTER_FALLBACK_MODEL: str | None = "gemini-3.1-flash-lite"
     GROQ_API_KEY: str | None = None
     GEMINI_API_KEY: str | None = None
     LLM_TEMPERATURE: float = 0.1
