@@ -36,9 +36,10 @@ export default function ChatPage({ user, onLogout }) {
     [conversations, selectedConversationId]
   );
 
-  const messages = selectedConversationId
-    ? messagesByConversation[selectedConversationId] || []
-    : [];
+  const messages = useMemo(
+    () => (selectedConversationId ? messagesByConversation[selectedConversationId] || [] : []),
+    [messagesByConversation, selectedConversationId]
+  );
 
   const isLoadingMessages =
     !!selectedConversationId &&
@@ -57,13 +58,18 @@ export default function ChatPage({ user, onLogout }) {
     });
   };
 
-  const { activeAgent, agentSwitched, connectionState, isSending, sendMessage } = useConversationSocket({
+  const { agentStatus, connectionState, isSending, sendMessage } = useConversationSocket({
     selectedAgent,
     selectedConversationId,
-    selectedConversation,
     setMessagesByConversation,
     setStatusMessage,
   });
+
+  // Derived, not stored: the agent that wrote the latest reply, else the saved state.
+  const activeAgent = useMemo(() => {
+    const lastReply = [...messages].reverse().find((m) => m.role === "assistant" && m.agent_name);
+    return lastReply?.agent_name || selectedConversation?.convo_metadata?.agent_state?.active_agent || "general";
+  }, [messages, selectedConversation]);
 
   // Fetch agents list from the backend on mount
   useEffect(() => {
@@ -337,14 +343,12 @@ export default function ChatPage({ user, onLogout }) {
     setDraftFiles(selectedConversationId, []);
   };
 
-  const handleSendMessage = async ({ content, fileIds }) => {
+  const handleSendMessage = async ({ content, fileIds, format }) => {
     if (!selectedConversationId) {
       setStatusMessage("Select a conversation before sending a message.");
       return false;
     }
-
-    sendMessage(content, fileIds);
-    return true;
+    return sendMessage(content, fileIds, { format });
   };
 
   const handleAgentSelect = (agentName) => {
@@ -427,8 +431,8 @@ export default function ChatPage({ user, onLogout }) {
 
         <ChatWindow
           activeAgent={activeAgent}
+          agentStatus={agentStatus}
           agents={agents}
-          agentSwitched={agentSwitched}
           attachedFiles={attachedFiles}
           conversation={selectedConversation}
           isLoading={isLoadingMessages}

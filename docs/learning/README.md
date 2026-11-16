@@ -22,6 +22,7 @@ One note per branch, in the order the work was done. Each note covers: the conce
 | 16 | `feature/auth` | Argon2id, JWT pitfalls, ownership checks, 404 vs 403, tokens in URLs |
 | 17 | `docs/architecture` | Diagrams as code (Mermaid), design decisions, requirements mapping |
 | 18 | `feature/fe-auth` | Interceptors, tokens in URLs, case-sensitive imports, CORS-masked 500s |
+| 19 | `feature/fe-streaming` | WebSocket event handling, draft vs saved messages, derived state |
 
 ## Branching workflow
 - `develop-be` is cut from `main`, with the latest feature branch merged in.
