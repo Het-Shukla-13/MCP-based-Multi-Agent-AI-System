@@ -104,6 +104,8 @@ sequenceDiagram
 | Tool security | Identity args overwritten server-side; SSRF guard; no code execution | Prompt injection can't cross users or reach internal services |
 | Embeddings | Gemini `gemini-embedding-001`, 768-d, normalised | Spec requirement; no local model; rate-limited client |
 | Auth | Argon2id + JWT; owner-scoped queries; 404 for not-owned | Identity never trusted from the client |
+| Sessions | 60-min access JWT + 7-day refresh token (hashed, rotated, reuse ⇒ revoke) | Long sessions without long-lived bearer tokens |
+| Realtime | Streaming deltas; client auto-reconnect with backoff + resync | Replies survive network drops and restarts |
 | Models | Gemini for chat-facing work, Groq for background jobs | Spreads per-model free-tier quotas; automatic fallbacks |
 
 ---
@@ -150,9 +152,16 @@ uv pip install --python .venv/bin/python -r requirements-dev.txt
 # 3. Background worker (only when FILE_PROCESSING_BACKEND="celery")
 .venv/bin/celery -A app.core.celery_app.celery_app worker --pool=solo --loglevel=info
 
-# 4. Tests
+# 4. Backend tests
 .venv/bin/python -m pytest -q
+
+# 5. Frontend (new terminal) -> http://localhost:5173, create an account there
+cd frontend && cp .env.example .env && npm ci && npm run dev
+
+# 6. Browser tests (backend running): fast set without LLM calls, then everything
+npx playwright install chromium && npm run test:e2e:fast && npm run test:e2e
 ```
+More on the UI, sessions and tests: [`frontend/README.md`](frontend/README.md).
 API docs: http://localhost:8000/docs. Click **Authorize** and paste the `access_token` from `/auth/login`. The MCP servers start automatically as child processes of the API.
 
 After changing `EMBEDDING_MODEL` or `EMBEDDING_DIM`, run a migration and then `.venv/bin/python -m scripts.reembed`.
@@ -193,6 +202,6 @@ backend/
 ├── migrations/                 Alembic (baseline + changes)
 ├── scripts/reembed.py          refill embeddings after a model change
 └── tests/                      unit tests (pytest)
-frontend/                       React + Vite chat UI
+frontend/                       React + Vite chat UI (+ e2e/ Playwright tests)
 docs/learning/                  one learning note per branch
 ```

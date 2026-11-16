@@ -34,6 +34,7 @@ One note per branch, in the order the work was done. Each note covers: the conce
 | 28 | `feature/fe-responsive` | Off-canvas drawer, dvh, hover media query, CSS cascade order |
 | 29 | `fix/fe-stale-responses` | Out-of-order responses, latest-request guard |
 | 30 | `feature/fe-e2e-tests` | Playwright test runner, isolation, web-first assertions, flaky vs real bugs |
+| 31 | `docs/fe-readme` | Documentation for users and future developers |
 
 ## Branching workflow
 - `develop-be` is cut from `main`, with the latest feature branch merged in.
