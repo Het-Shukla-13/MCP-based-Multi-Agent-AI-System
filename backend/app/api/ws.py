@@ -9,6 +9,7 @@ from sqlmodel import select
 from uuid import UUID
 from app.db.database import get_db
 from app.models import Conversation
+from app.core.security import decode_access_token
 from app.core.websocket import manager
 from app.services.time.timing import elapsed_minutes
 from sqlalchemy.ext.asyncio.session import AsyncSession
@@ -36,15 +37,11 @@ async def list_agents():
 
 @router.websocket("/{conversation_id}")
 async def websocket_endpoint(websocket: WebSocket, conversation_id: UUID, db: AsyncSession = Depends(get_db)):
-    user_id = websocket.query_params.get("user_id")
-    if not user_id:
-        await websocket.close(code=1008)
-        return
-
-    try:
-        authenticated_user_id = UUID(user_id)
-    except ValueError:
-        await websocket.close(code=1008)
+    # Browsers can't set headers on a WebSocket, so the access token comes as
+    # ?token=. The user id is DERIVED from it; a client-supplied user_id is ignored.
+    authenticated_user_id = decode_access_token(websocket.query_params.get("token") or "")
+    if authenticated_user_id is None:
+        await websocket.close(code=1008)  # 1008 = policy violation
         return
 
     result = await db.execute(

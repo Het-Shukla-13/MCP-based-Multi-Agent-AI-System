@@ -48,15 +48,16 @@ async def get_conversation(db: AsyncSession, conversation_id: UUID) -> Conversat
         raise HTTPException(status_code=404, detail="Conversation not found")
     return conversation
 
-async def get_conversations(db: AsyncSession, user_id: UUID | None = None) -> list[Conversation]:
+async def get_conversations(db: AsyncSession, user_id: UUID) -> list[Conversation]:
+    """user_id is required on purpose: an optional filter that defaults to 'all users'
+    is one forgotten argument away from a data leak."""
     query = select(Conversation).options(
         selectinload(Conversation.files),
         selectinload(Conversation.user),
         selectinload(Conversation.messages).selectinload(Message.files)  
     )
 
-    if user_id:
-        query = query.where(Conversation.user_id == user_id)
+    query = query.where(Conversation.user_id == user_id).order_by(Conversation.created_at.desc())
 
     result = await db.execute(query)
     conversations = result.scalars().all()

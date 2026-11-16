@@ -4,18 +4,20 @@ import csv
 import html
 import json
 import secrets
+from urllib.parse import quote
 
 import markdown
 from pathlib import Path
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.database import get_db
 from app.services.file_generation.file_renderer import format_from_path, get_mime_type
-from app.crud.file import get_file
+from app.api.deps import get_current_user_header_or_query, owned_file
+from app.models import User
 
 router = APIRouter(prefix="/files", tags=["File Generation"])
 
@@ -23,9 +25,10 @@ router = APIRouter(prefix="/files", tags=["File Generation"])
 @router.get("/generated/{file_id}/download")
 async def download_generated_file(
     file_id: UUID,
+    user: User = Depends(get_current_user_header_or_query),
     db: AsyncSession = Depends(get_db),
 ):
-    file_record = await get_file(db, file_id)
+    file_record = await owned_file(db, file_id, user)
     path = Path(file_record.storage_path)
     if not path.exists():
         raise HTTPException(status_code=404, detail="Generated file is missing from storage.")
@@ -43,9 +46,10 @@ async def download_generated_file(
 @router.get("/generated/{file_id}/raw")
 async def raw_generated_file(
     file_id: UUID,
+    user: User = Depends(get_current_user_header_or_query),
     db: AsyncSession = Depends(get_db),
 ):
-    file_record = await get_file(db, file_id)
+    file_record = await owned_file(db, file_id, user)
     path = Path(file_record.storage_path)
     if not path.exists():
         raise HTTPException(status_code=404, detail="Generated file is missing from storage.")
@@ -76,8 +80,7 @@ th { background: #f2f4f7; } img { max-width: 100%; } iframe { width: 100%; heigh
 """
 
 
-def _preview_body(file_id: UUID, mime_type: str, raw: str | None) -> str:
-    raw_url = f"/files/generated/{file_id}/raw"
+def _preview_body(raw_url: str, mime_type: str, raw: str | None) -> str:
     if mime_type == "application/pdf":
         return f'<iframe src="{raw_url}" title="PDF preview"></iframe>'
     if mime_type.startswith("image/"):
@@ -100,7 +103,11 @@ def _preview_body(file_id: UUID, mime_type: str, raw: str | None) -> str:
 
 
 @router.get("/generated/{file_id}/preview", response_class=HTMLResponse)
-async def preview_generated_file(file_id: UUID, db: AsyncSession = Depends(get_db)):
+async def preview_generated_file(file_id: UUID,
+    request: Request,
+    user: User = Depends(get_current_user_header_or_query),
+    db: AsyncSession = Depends(get_db),
+):
     """
     Browser preview of a generated file.
 
@@ -109,7 +116,7 @@ async def preview_generated_file(file_id: UUID, db: AsyncSession = Depends(get_d
     - a Content-Security-Policy allows ONLY our own copy-button script (per-request nonce);
       a <script> or onerror= inside rendered Markdown is blocked by the browser (stored XSS).
     """
-    file_record = await get_file(db, file_id)
+    file_record = await owned_file(db, file_id, user)
     path = Path(file_record.storage_path)
     if not path.exists():
         raise HTTPException(status_code=404, detail="Generated file is missing from storage.")
@@ -117,20 +124,27 @@ async def preview_generated_file(file_id: UUID, db: AsyncSession = Depends(get_d
     mime_type = (file_record.file_type or "").split(";")[0].strip().lower()
     raw = path.read_text(encoding="utf-8", errors="replace") if mime_type.startswith(("text/", "application/json")) else None
     nonce = secrets.token_urlsafe(16)
+    # The browser loads the embedded image/PDF and the links without our
+    # Authorization header, so they carry the same access token as this page.
+    token = request.query_params.get("token")
+    suffix = f"?token={quote(token)}" if token else ""
+    raw_url = html.escape(f"/files/generated/{file_id}/raw{suffix}")
+    download_url = html.escape(f"/files/generated/{file_id}/download{suffix}")
     name = html.escape(file_record.filename)
     page = f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
 <title>Preview: {name}</title><style>{PREVIEW_CSS}</style></head>
 <body>
   <div class="bar">
     <div><div class="title">{name}</div><div class="type">{html.escape(mime_type)}</div></div>
     <div class="actions">
-      <a href="/files/generated/{file_id}/download">Download</a>
-      <a href="/files/generated/{file_id}/raw" target="_blank" rel="noreferrer">Open raw</a>
+      <a href="{download_url}">Download</a>
+      <a href="{raw_url}" target="_blank" rel="noreferrer">Open raw</a>
       <button type="button" id="copy-btn">Copy text</button>
     </div>
   </div>
-  <div class="content" id="preview-root">{_preview_body(file_id, mime_type, raw)}</div>
+  <div class="content" id="preview-root">{_preview_body(raw_url, mime_type, raw)}</div>
   <script nonce="{nonce}">
     document.getElementById('copy-btn').addEventListener('click', function () {{
       navigator.clipboard.writeText(document.getElementById('preview-root').innerText);

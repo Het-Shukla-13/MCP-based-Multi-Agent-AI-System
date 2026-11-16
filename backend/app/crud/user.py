@@ -4,6 +4,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from fastapi import HTTPException
 from uuid import UUID
 
+from app.core.security import hash_password
 from app.models import User
 
 async def create_user(db: AsyncSession, payload) -> User:
@@ -11,7 +12,7 @@ async def create_user(db: AsyncSession, payload) -> User:
     existing_user = result.scalar_one_or_none()
     if existing_user:
         raise HTTPException(status_code=400, detail="Email already registered")
-    user = User(email=payload.email, password=payload.password)
+    user = User(email=payload.email.lower(), password_hash=hash_password(payload.password))
     db.add(user)
     await db.commit()
     result = await db.execute(
@@ -51,7 +52,7 @@ async def update_user(db: AsyncSession, user_id: UUID, email: str | None = None,
             raise HTTPException(status_code=400, detail="Email already in use")
         user.email = email
     if password:
-        user.password = password  # hash later
+        user.password_hash = hash_password(password)
     if is_active is not None:
         user.is_active = is_active
 

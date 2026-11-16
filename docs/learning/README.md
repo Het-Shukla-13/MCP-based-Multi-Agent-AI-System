@@ -19,6 +19,7 @@ One note per branch, in the order the work was done. Each note covers: the conce
 | 13 | `feature/gemini-embeddings` | Vector spaces, re-embedding, rate limits, threshold calibration, vision OCR |
 | 14 | `feature/streaming-responses` | SSE partial events, delta protocol, measuring latency, background work |
 | 15 | `feature/file-generation-templates` | Templates + context injection, tool errors as instructions, XSS, CSP nonces |
+| 16 | `feature/auth` | Argon2id, JWT pitfalls, ownership checks, 404 vs 403, tokens in URLs |
 
 ## Branching workflow
 - `develop-be` is cut from `main`, with the latest feature branch merged in.

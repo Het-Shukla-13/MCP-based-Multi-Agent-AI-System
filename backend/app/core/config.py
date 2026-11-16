@@ -16,6 +16,11 @@ class Settings(BaseSettings):
     DATABASE_URL_SYNC: str
     ENV:str="dev"
     DB_ECHO: bool = False  # True prints every SQL statement (debugging only)
+    # --- Auth ---
+    # Required, no default: the app must not start with a guessable signing key.
+    JWT_SECRET: str
+    JWT_ALGORITHM: str = "HS256"
+    ACCESS_TOKEN_MINUTES: int = 60
     # Browser origins allowed to call the API (JSON list in .env).
     CORS_ORIGINS: list[str] = ["http://localhost:5173"]
     # --- LLM models (free tiers only; verify availability before changing) ---

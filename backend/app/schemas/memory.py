@@ -146,7 +146,6 @@ class MemoryOut(BaseModel):
 
 
 class MemoryCreateRequest(BaseModel):
-    user_id: UUID
     content: str = Field(min_length=1, max_length=2000)
     memory_type: MemoryType
     importance_score: float = Field(default=0.7, ge=0.0, le=1.0)
