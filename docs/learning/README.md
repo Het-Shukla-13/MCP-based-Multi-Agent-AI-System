@@ -7,6 +7,7 @@ One note per branch, in the order the work was done. Each note covers: the conce
 | 01 | `fix/llm-model-config` | Model lifecycle, provider routing, reasoning models, fallbacks, tokenizers |
 | 02 | `chore/python-312` | Python 3.12 venv, removed unused faiss-cpu |
 | 03 | `fix/agent-isolation-and-async` | Shared mutable state, event loop blocking, sticky routing |
+| 04 | `fix/memory-pipeline-crashes` | Model-vs-dict contracts, return-type honesty, silent failures |
 
 ## Branching workflow
 - `develop-be` is cut from `main`, with the latest feature branch merged in.

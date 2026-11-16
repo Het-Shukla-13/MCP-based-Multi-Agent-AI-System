@@ -1,3 +1,4 @@
+from loguru import logger
 import json
 import re
 from dataclasses import dataclass
@@ -164,6 +165,7 @@ async def route_context_policy(
         )
         # policy = ContextPolicy.model_validate_json(response)
     except Exception:
+        logger.exception("Context router LLM call failed; using keyword fallback policy")
         return _fallback_policy(
             query_text=query_text,
             recent_messages=recent_messages,
