@@ -263,6 +263,7 @@ async def send_message(
         conversation_id=str(payload.conversation_id),
         user_message=payload.content,
         selected_agent=explicit_agent,          # None → LLM router picks; string → forced
+        previous_agent=previous_active_agent,   # stickiness hint for the LLM router
         stm_context=unified_memory.stm_summary if unified_memory.context_policy.needs_stm_summary else "",
         ltm_context=unified_memory.ltm_context if unified_memory.context_policy.needs_long_term_memory else "",
         profile_context=unified_memory.user_profile_text if unified_memory.context_policy.needs_user_profile else "",

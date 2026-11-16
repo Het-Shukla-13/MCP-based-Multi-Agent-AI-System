@@ -38,11 +38,9 @@ class RootAgent:
             selected = context.selected_agent
             logger.info("Agent selection | mode=explicit | agent=%s", selected)
         else:
-            # LLM supervisor routing: infer the best agent from the message content.
-            # Pass "general" as the baseline hint if there's no prior agent context.
-            from app.agent_layer.core.state import get_agent_state
-            agent_state = get_agent_state(context.conversation_metadata)
-            previous_agent = agent_state.get("active_agent", "general")
+            # LLM supervisor routing: infer the best agent from the message content,
+            # using the previous turn's agent as a stickiness hint.
+            previous_agent = context.previous_agent or "general"
             logger.info(
                 "Agent selection | mode=llm_routing | previous_agent=%s | message_preview=%s",
                 previous_agent,
