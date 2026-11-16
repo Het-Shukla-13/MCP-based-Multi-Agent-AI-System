@@ -13,6 +13,7 @@ from mcp.server.fastmcp import FastMCP
 
 from app.mcp_servers.common import configure_server_logging, save_generated_file
 from app.services.file_generation.file_renderer import filename_timestamp, render_markdown_pdf, slugify
+from app.services.file_generation.templates import describe_templates, render_template
 
 configure_server_logging("artifacts")
 mcp = FastMCP("artifacts")
@@ -55,6 +56,34 @@ async def create_file(title: str, file_format: str, content: str, user_id: str =
         user_id, conversation_id, f"{filename_timestamp()}_{slugify(title)}.{fmt}", data, FORMATS[fmt]
     )
     return f"File created: {saved['filename']}\n{saved}"
+
+
+@mcp.tool()
+async def list_templates() -> str:
+    """List the document templates (report, meeting_notes, study_notes, comparison, email)
+    with their required and optional fields. Call before create_from_template."""
+    return describe_templates()
+
+
+@mcp.tool()
+async def create_from_template(template: str, title: str, fields: dict[str, str], file_format: str = "pdf",
+                               user_id: str = "", conversation_id: str = "") -> str:
+    """Create a consistently structured document from a template. `fields` maps field names to
+    Markdown content written from the conversation (see list_templates). The date and title
+    are added automatically. file_format: pdf, md or txt.
+    user_id/conversation_id are filled in automatically."""
+    fmt = file_format.lower().lstrip(".")
+    if fmt not in {"pdf", "md", "txt"}:
+        return "file_format must be pdf, md or txt for templates."
+    try:
+        markdown_text = render_template(template, title, fields)
+    except ValueError as exc:
+        return f"{exc}. Fix the fields and call create_from_template again."
+    data = render_markdown_pdf("", markdown_text) if fmt == "pdf" else markdown_text.encode("utf-8")
+    saved = await save_generated_file(
+        user_id, conversation_id, f"{filename_timestamp()}_{slugify(title)}.{fmt}", data, FORMATS[fmt]
+    )
+    return f"File created from template '{template}': {saved['filename']}\n{saved}"
 
 
 if __name__ == "__main__":
