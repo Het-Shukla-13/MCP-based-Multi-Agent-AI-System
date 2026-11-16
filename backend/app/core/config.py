@@ -43,6 +43,8 @@ class Settings(BaseSettings):
     MAINTENANCE_MIN_COMPARISONS_FOR_OPTIONAL_STAGES: int = 1
     MAINTENANCE_MIN_COMPARISONS_FOR_PROFILE_REFRESH: int = 1
     PROFILE_MAX_LLM_COMPARISONS_PER_REFRESH: int = 3
+    # Stream reply text to the browser as it is generated (WebSocket chat_delta events).
+    STREAMING_ENABLED: bool = True
     # --- Embeddings (Gemini, free tier: 100 requests/min; each text = 1 request) ---
     EMBEDDING_MODEL: str = "gemini-embedding-001"
     EMBEDDING_DIM: int = 768  # changing this requires a migration + scripts/reembed.py

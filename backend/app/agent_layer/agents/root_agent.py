@@ -38,6 +38,8 @@ from app.agent_layer.core.base import (
     StatusCallback,
     collect_generated_files,
     emit_status,
+    emit_text_delta,
+    run_config,
     emit_tool_events,
     is_retryable_provider_error,
 )
@@ -152,9 +154,14 @@ class RootAgent:
             user_id=context.user_id,
             session_id=session.id,
             new_message=Content(role="user", parts=[Part.from_text(text=context.user_message)]),
+            run_config=run_config(),
         ):
             await emit_tool_events(on_status, event)
+            if event.author != ROOT_NAME:  # never stream the router's own text
+                await emit_text_delta(on_status, event)
             collect_generated_files(event, generated)
+            if getattr(event, "partial", False):
+                continue  # final text comes from the complete (non-partial) events
             parts = (event.content.parts if event.content and event.content.parts else [])
             for part in parts:
                 call = getattr(part, "function_call", None)

@@ -17,6 +17,7 @@ One note per branch, in the order the work was done. Each note covers: the conce
 | 11 | `feature/mcp-client` | MCP protocol, McpToolset, composition for least privilege, identity injection, stdio rules |
 | 12 | `feature/agent-tools` | Five MCP servers, SSRF, no-RCE design, free-service verification, retryable errors |
 | 13 | `feature/gemini-embeddings` | Vector spaces, re-embedding, rate limits, threshold calibration, vision OCR |
+| 14 | `feature/streaming-responses` | SSE partial events, delta protocol, measuring latency, background work |
 
 ## Branching workflow
 - `develop-be` is cut from `main`, with the latest feature branch merged in.
