@@ -54,6 +54,7 @@ function ConversationItem({ conversation, isActive, onSelect, onRename, onDelete
 }
 
 export default function Sidebar({
+  isOpen,
   user,
   onLogout,
   conversations,
@@ -70,7 +71,7 @@ export default function Sidebar({
   const importRef = useRef(null);
 
   return (
-    <aside className="sidebar">
+    <aside className={`sidebar${isOpen ? " sidebar--open" : ""}`}>
       <div className="sidebar__header">
         <p className="sidebar__eyebrow">Multi-Agent Assistant</p>
         <h1>Conversations</h1>

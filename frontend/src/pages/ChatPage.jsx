@@ -23,6 +23,9 @@ export default function ChatPage({ user, onLogout }) {
   // so a pick in one chat silently disabled routing in every chat).
   const [pinnedAgentByConversation, setPinnedAgentByConversation] = useState({});
   const [isMemoryOpen, setIsMemoryOpen] = useState(false);
+  // Mobile only: the conversation list is an off-canvas drawer (CSS hides the
+  // toggle and keeps the sidebar visible on wide screens).
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [conversations, setConversations] = useState([]);
   const [selectedConversationId, setSelectedConversationId] = useState("");
   const [messagesByConversation, setMessagesByConversation] = useState({});
@@ -492,14 +495,22 @@ export default function ChatPage({ user, onLogout }) {
 
   return (
     <div className="app-shell">
+      {isSidebarOpen ? <div aria-hidden="true" className="sidebar-backdrop" onClick={() => setIsSidebarOpen(false)} /> : null}
       <Sidebar
+        isOpen={isSidebarOpen}
         user={user}
         onLogout={onLogout}
         conversations={conversations}
         isConversationListLoading={isConversationListLoading}
         isCreatingConversation={isCreatingConversation}
-        onCreateConversation={handleCreateConversation}
-        onSelectConversation={setSelectedConversationId}
+        onCreateConversation={async () => {
+          await handleCreateConversation();
+          setIsSidebarOpen(false);
+        }}
+        onSelectConversation={(id) => {
+          setSelectedConversationId(id);
+          setIsSidebarOpen(false);
+        }}
         onRenameConversation={handleRenameConversation}
         onDeleteConversation={handleDeleteConversation}
         onExportConversation={handleExportConversation}
@@ -509,7 +520,16 @@ export default function ChatPage({ user, onLogout }) {
 
       <main className="workspace">
         <header className="workspace-header">
-          <div>
+          <button
+            aria-expanded={isSidebarOpen}
+            aria-label="Open conversations"
+            className="sidebar-toggle"
+            onClick={() => setIsSidebarOpen(true)}
+            type="button"
+          >
+            ☰
+          </button>
+          <div className="workspace-header__title">
             <p className="workspace-header__label">Current Chat</p>
             <h2>{selectedConversation?.title || "No conversation selected"}</h2>
           </div>
@@ -519,7 +539,7 @@ export default function ChatPage({ user, onLogout }) {
           </div>
         </header>
 
-        <div className="status-banner">{statusMessage}</div>
+        {statusMessage ? <div className="status-banner" role="status">{statusMessage}</div> : null}
 
         <ChatWindow
           activeAgent={activeAgent}
