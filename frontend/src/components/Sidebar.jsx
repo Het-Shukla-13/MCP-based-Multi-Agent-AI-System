@@ -10,6 +10,8 @@ function formatConversationDate(value) {
 }
 
 export default function Sidebar({
+  user,
+  onLogout,
   conversations,
   isConversationListLoading,
   isCreatingConversation,
@@ -37,7 +39,7 @@ export default function Sidebar({
         {isConversationListLoading ? (
           <p className="sidebar__hint">Loading conversations...</p>
         ) : conversations.length === 0 ? (
-          <p className="sidebar__hint">No conversations found for this user.</p>
+          <p className="sidebar__hint">No conversations yet.</p>
         ) : (
           conversations.map((conversation) => (
             <button
@@ -55,6 +57,11 @@ export default function Sidebar({
             </button>
           ))
         )}
+      </div>
+
+      <div className="sidebar__account">
+        <span className="sidebar__email" title={user?.email}>{user?.email}</span>
+        <button className="link-button" onClick={onLogout} type="button">Sign out</button>
       </div>
     </aside>
   );

@@ -1,14 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import { buildConversationWebSocketUrl } from "../lib/socket";
 
-function createTempMessage(content, userId) {
+function createTempMessage(content) {
   return {
     id: `temp-${crypto.randomUUID()}`,
     content,
     created_at: new Date().toISOString(),
     pending: true,
     role: "user",
-    user_id: userId,
   };
 }
 
@@ -35,7 +34,6 @@ function mergeIncomingMessages(currentMessages, userMessage, aiMessage) {
 }
 
 export function useConversationSocket({
-  activeUserId,
   selectedAgent,
   selectedConversationId,
   selectedConversation,
@@ -100,7 +98,7 @@ export function useConversationSocket({
 
     const conversationId = selectedConversationId;
     const socket = new WebSocket(
-      buildConversationWebSocketUrl(conversationId, activeUserId)
+      buildConversationWebSocketUrl(conversationId)
     );
 
     socketRef.current = socket;
@@ -183,7 +181,6 @@ export function useConversationSocket({
       }
     };
   }, [
-    activeUserId,
     selectedConversationId,
     setMessagesByConversation,
     setStatusMessage,
@@ -191,11 +188,6 @@ export function useConversationSocket({
 
   const sendMessage = (content, attachedFileIds = []) => {
     const socket = socketRef.current;
-
-    if (!activeUserId) {
-      setStatusMessage("Set VITE_USER_ID before using chat.");
-      return;
-    }
 
     if (
       !selectedConversationId ||
@@ -208,7 +200,7 @@ export function useConversationSocket({
 
     updateConversationMessages(selectedConversationId, (currentMessages) => [
       ...currentMessages,
-      createTempMessage(content, activeUserId),
+      createTempMessage(content),
     ]);
 
     setSendingConversationId(selectedConversationId);
@@ -217,7 +209,6 @@ export function useConversationSocket({
       JSON.stringify({
         content,
         file_ids: attachedFileIds,
-        user_id: activeUserId,
         // Pass the explicitly selected agent so the backend bypasses LLM routing
         selected_agent: selectedAgent || null,
       })

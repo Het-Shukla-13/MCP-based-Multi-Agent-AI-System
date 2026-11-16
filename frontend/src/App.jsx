@@ -1,37 +1,29 @@
 import { useEffect, useState } from "react";
+import AuthPage from "./pages/AuthPage.jsx";
 import ChatPage from "./pages/ChatPage.jsx";
-import AgentSwitcher from "./components/AgentSwitcher.jsx";
+import { fetchMe } from "./lib/api";
+import { clearToken, getToken, onTokenChange } from "./lib/auth";
 
-function App() {
-  const [selectedAgent, setSelectedAgent] = useState(null);
-  const [activeAgent, setActiveAgent] = useState("general");
+export default function App() {
+  const [token, setTokenState] = useState(getToken());
+  const [user, setUser] = useState(null);
 
-  // Load persisted agent selection
+  useEffect(() => onTokenChange(setTokenState), []);
+
+  // Validate a stored token (it may have expired) and load the account.
   useEffect(() => {
-    const saved = localStorage.getItem("selectedAgent");
-    if (saved) setSelectedAgent(saved);
-  }, []);
+    if (!token) return;
+    let active = true;
+    fetchMe()
+      .then((me) => active && setUser(me))
+      .catch(() => active && clearToken()); // 401 -> back to the sign-in screen
+    return () => {
+      active = false;
+    };
+  }, [token]);
 
-  // Persist when it changes
-  useEffect(() => {
-    if (selectedAgent) {
-      localStorage.setItem("selectedAgent", selectedAgent);
-    } else {
-      localStorage.removeItem("selectedAgent");
-    }
-  }, [selectedAgent]);
-
-  return (
-    <>
-      <AgentSwitcher activeAgent={activeAgent} />
-      <ChatPage
-        selectedAgent={selectedAgent}
-        setSelectedAgent={setSelectedAgent}
-        activeAgent={activeAgent}
-        setActiveAgent={setActiveAgent}
-      />
-    </>
-  );
+  if (!token) return <AuthPage />;
+  if (!user) return <div className="auth-shell"><p className="sidebar__hint">Loading your account...</p></div>;
+  // key: a different account gets a completely fresh chat state.
+  return <ChatPage key={user.id} user={user} onLogout={() => { clearToken(); setUser(null); }} />;
 }
-
-export default App;

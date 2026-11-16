@@ -1,80 +1,101 @@
 import axios from "axios";
+import { clearToken, getToken } from "./auth";
 
-const API_BASE_URL =
-  import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000";
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000";
 
-export const api = axios.create({
-  baseURL: API_BASE_URL,
+export const api = axios.create({ baseURL: API_BASE_URL });
+
+// Attach the access token to every request.
+api.interceptors.request.use((config) => {
+  const token = getToken();
+  if (token) config.headers.Authorization = `Bearer ${token}`;
+  return config;
 });
+
+// An expired or invalid token logs the user out everywhere at once.
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (error.response?.status === 401 && getToken()) clearToken();
+    return Promise.reject(error);
+  }
+);
 
 export function getApiBaseUrl() {
   return API_BASE_URL;
 }
 
-export async function fetchConversations(userId) {
-  const response = await api.get("/conversations/", {
-    params: { user_id: userId },
-  });
-
-  return response.data;
+/** Readable error text from an API failure (FastAPI returns {detail}). */
+export function errorMessage(error, fallback) {
+  const detail = error?.response?.data?.detail;
+  if (typeof detail === "string") return detail;
+  if (Array.isArray(detail) && detail[0]?.msg) return detail[0].msg; // validation errors
+  return fallback;
 }
 
-export async function createConversation(payload) {
-  const response = await api.post("/conversations/", payload);
-  return response.data;
+// ---- auth ----
+export async function register(email, password) {
+  return (await api.post("/auth/register", { email, password })).data;
+}
+
+export async function login(email, password) {
+  return (await api.post("/auth/login", { email, password })).data;
+}
+
+export async function fetchMe() {
+  return (await api.get("/auth/me")).data;
+}
+
+// ---- conversations ----
+export async function fetchConversations() {
+  return (await api.get("/conversations/")).data;
+}
+
+export async function createConversation(title) {
+  return (await api.post("/conversations/", { title })).data;
+}
+
+export async function renameConversation(conversationId, title) {
+  return (await api.patch(`/conversations/${conversationId}`, { title })).data;
+}
+
+export async function deleteConversation(conversationId) {
+  await api.delete(`/conversations/${conversationId}`);
 }
 
 export async function fetchMessages(conversationId) {
-  const response = await api.get("/messages/", {
-    params: { conversation_id: conversationId },
-  });
-
-  return response.data;
+  return (await api.get("/messages/", { params: { conversation_id: conversationId } })).data;
 }
 
+// ---- files ----
 export async function fetchConversationFiles(conversationId) {
-  const response = await api.get("/files/", {
-    params: { conversation_id: conversationId },
-  });
-
-  return response.data;
+  return (await api.get("/files/", { params: { conversation_id: conversationId } })).data;
 }
 
-export async function uploadConversationFiles({
-  conversationId,
-  files,
-}) {
+export async function uploadConversationFiles({ conversationId, files }) {
   const formData = new FormData();
-
-  files.forEach((file) => {
-    formData.append("files", file);
-  });
-
+  files.forEach((file) => formData.append("files", file));
   const response = await api.post("/files/upload", formData, {
-    headers: {
-      "Content-Type": "multipart/form-data",
-    },
-    params: {
-      conversation_id: conversationId,
-    },
+    params: { conversation_id: conversationId },
   });
-
   return response.data;
 }
 
 export async function fetchAgents() {
-  const response = await api.get("/ws/agents");
-  return response.data.agents;
+  return (await api.get("/ws/agents")).data.agents;
 }
 
-export function getGeneratedFileRawUrl(fileId) {
-  return `${API_BASE_URL}/files/generated/${fileId}/raw`;
+/**
+ * Links the BROWSER opens itself (<a href>, <img src>, new tab) can't carry the
+ * Authorization header, so the token goes in the query string. The backend accepts
+ * ?token= only on these read-only file routes.
+ */
+export function withToken(path) {
+  const url = new URL(path, API_BASE_URL);
+  const token = getToken();
+  if (token) url.searchParams.set("token", token);
+  return url.toString();
 }
 
-export function getGeneratedFilePreviewUrl(fileId) {
-  return `${API_BASE_URL}/files/generated/${fileId}/preview`;
-}
-
-export function getGeneratedFileDownloadUrl(fileId) {
-  return `${API_BASE_URL}/files/generated/${fileId}/download`;
-}
+export const generatedFileUrl = (fileId, kind = "preview") =>
+  withToken(`/files/generated/${fileId}/${kind}`);
