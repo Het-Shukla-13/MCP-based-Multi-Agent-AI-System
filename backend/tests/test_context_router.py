@@ -1,33 +1,22 @@
-from app.services.memory.context_router import _fallback_policy
+from app.services.memory.context_router import build_context_policy
 from app.services.conversation.conversation_metadata_service import merge_conversation_metadata
 from app.services.memory.unified_memory_service import filter_messages_for_policy
 from app.services.memory.context_router import ContextPolicy
 
 
-def test_fallback_policy_keeps_self_contained_turns_memory_light():
-    policy = _fallback_policy(
-        query_text="Hey",
-        recent_messages=[],
-        has_rag_context=False,
-    )
-
-    assert policy.needs_recent_history is False
-    assert policy.needs_long_term_memory is False
-    assert policy.needs_related_conversations is False
-    assert policy.needs_user_profile is False
-    assert policy.is_self_contained is True
-
-
-def test_fallback_policy_detects_referential_turns():
-    policy = _fallback_policy(
-        query_text="What was that earlier point again?",
-        recent_messages=[object(), object()],
-        has_rag_context=False,
-    )
+def test_context_policy_always_retrieves_memory():
+    policy = build_context_policy(has_rag_context=False)
 
     assert policy.needs_recent_history is True
-    assert policy.allow_temporary_modes is True
-    assert policy.is_self_contained is False
+    assert policy.needs_stm_summary is True
+    assert policy.needs_long_term_memory is True
+    assert policy.needs_related_conversations is True
+    assert policy.needs_user_profile is True
+    assert policy.needs_file_context is False
+
+
+def test_context_policy_never_drops_attached_file_context():
+    assert build_context_policy(has_rag_context=True).needs_file_context is True
 
 
 def test_merge_conversation_metadata_replaces_stale_active_goals():
@@ -74,7 +63,7 @@ def test_filter_messages_for_policy_drops_stm_summary_when_not_requested():
     filtered = filter_messages_for_policy(
         [summary_message, user_message],
         # ContextPolicy now requires every field; start from a real policy and override.
-        _fallback_policy(query_text="hi", recent_messages=[], has_rag_context=False).model_copy(
+        build_context_policy(has_rag_context=False).model_copy(
             update={"needs_recent_history": True, "needs_stm_summary": False}
         ),
     )

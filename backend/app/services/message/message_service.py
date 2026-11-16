@@ -25,7 +25,7 @@ from app.services.file_generation.intent_router import (
 )
 from app.services.file_generation.file_generation_service import generate_file_artifact
 from app.agent_layer.agents.root_agent import RootAgent
-from app.agent_layer.schemas import AgentContext
+from app.agent_layer.schemas import AgentContext, HistoryMessage
 from app.agent_layer.core.state import get_agent_state, set_active_agent
 
 root_agent = RootAgent()
@@ -177,6 +177,15 @@ def build_ai_message_payload(
 #     return metadata
 
 
+AGENT_VISIBLE_METADATA_KEYS = ("topics", "entities", "active_goals", "sentiment", "summary_hint")
+
+
+def _metadata_for_agent(convo_metadata: dict | None) -> dict:
+    """Only the descriptive metadata; internal state (stm, agent_state) stays out of the prompt."""
+    metadata = convo_metadata or {}
+    return {key: metadata[key] for key in AGENT_VISIBLE_METADATA_KEYS if metadata.get(key)}
+
+
 @log_async_timing("send_message")
 async def send_message(
     db: AsyncSession,
@@ -259,17 +268,28 @@ async def send_message(
         "explicit" if explicit_agent else "llm_routing",
     )
 
+    # Recent window from our DB (already token-limited by build_smart_history).
+    # Skip the rolling-summary pseudo-message (passed separately as stm_context)
+    # and the current user message (sent as the new turn).
+    history = [
+        HistoryMessage(role=m.role, content=m.content)
+        for m in unified_memory.messages
+        if m.role in ("user", "assistant") and m.id != user_message.id and m.content
+    ]
+
     agent_context = AgentContext(
         user_id=str(payload.user_id),
         conversation_id=str(payload.conversation_id),
         user_message=payload.content,
         selected_agent=explicit_agent,          # None → LLM router picks; string → forced
         previous_agent=previous_active_agent,   # stickiness hint for the LLM router
-        stm_context=unified_memory.stm_summary if unified_memory.context_policy.needs_stm_summary else "",
-        ltm_context=unified_memory.ltm_context if unified_memory.context_policy.needs_long_term_memory else "",
-        profile_context=unified_memory.user_profile_text if unified_memory.context_policy.needs_user_profile else "",
-        rag_context=unified_memory.rag_context if unified_memory.context_policy.needs_file_context else "",
-        conversation_metadata=conversation.convo_metadata if unified_memory.context_policy.needs_conversation_metadata else {},
+        history=history,
+        stm_context=unified_memory.stm_summary,
+        ltm_context=unified_memory.ltm_context,
+        profile_context=unified_memory.user_profile_text,
+        related_conversations_context=unified_memory.related_conversations_context,
+        rag_context=unified_memory.rag_context,
+        conversation_metadata=_metadata_for_agent(conversation.convo_metadata),
     )
 
     ai_response_started_at = perf_counter()

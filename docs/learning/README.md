@@ -11,6 +11,7 @@ One note per branch, in the order the work was done. Each note covers: the conce
 | 05 | `fix/migrations-and-vector-index` | Alembic chains, squashing, pgvector operators and HNSW, FK cascade |
 | 06 | `fix/file-attachments-and-types` | Streaming uploads, magic bytes, dependencies, Future exceptions, Celery queues |
 | 07 | `chore/cleanup` | Direct vs transitive deps, extras, strip_headers bug, stale tests |
+| 08 | `feature/agent-context-wiring` | DB as single source of history, rules vs LLM decisions, relevance thresholds |
 
 ## Branching workflow
 - `develop-be` is cut from `main`, with the latest feature branch merged in.

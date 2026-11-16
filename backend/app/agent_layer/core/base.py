@@ -28,18 +28,15 @@ class BaseAgent(ABC):
     Both are cheap Python objects; nothing shared is mutated, so concurrent
     users can never see each other's memory/RAG/profile context.
 
-    The only shared object is ``session_service``. It stores ADK chat history
-    keyed by (user_id, conversation_id), so different conversations never mix.
+    History comes from OUR database (``context.history``), not from ADK's session
+    store: each request gets a throwaway in-memory session. So history survives
+    restarts, is shared by all agents (switching agents keeps context) and is
+    token-bounded by the STM window.
     """
 
     name: str
     description: str = ""
     tools: list[str] = []
-
-    def __init__(self):
-        # ADK session store (history per user+conversation).
-        # Will be replaced by our DB-backed history in feature/agent-context-wiring.
-        self.session_service = InMemorySessionService()
 
     @abstractmethod
     def _build_adk_agent(self) -> LlmAgent:
@@ -57,26 +54,29 @@ class BaseAgent(ABC):
         Inject per-request context into the system instruction (not the chat
         history), so ADK doesn't duplicate it into every stored turn.
         """
-        return f"""
-{base_instruction}
+        sections = [
+            ("SUMMARY OF EARLIER CONVERSATION", context.stm_context),
+            ("RECENT CONVERSATION (oldest first)", self._render_history(context)),
+            ("RELEVANT LONG-TERM MEMORY", context.ltm_context),
+            ("USER PROFILE", context.profile_context),
+            ("RELATED PAST CONVERSATIONS", context.related_conversations_context),
+            ("ATTACHED FILE CONTEXT", context.rag_context),
+            ("CONVERSATION METADATA", str(context.conversation_metadata or "")),
+        ]
+        body = "\n\n".join(
+            f"{title}:\n{text.strip()}" for title, text in sections if text and text.strip()
+        )
+        if not body:
+            return base_instruction
+        return (
+            f"{base_instruction}\n\n"
+            "--- BACKGROUND CONTEXT (use when relevant; do not mention it explicitly) ---\n\n"
+            f"{body}"
+        )
 
---- BACKGROUND CONTEXT (Do not explicitly mention this context unless relevant) ---
-
-MEMORY (STM):
-{context.stm_context}
-
-LONG TERM MEMORY (LTM):
-{context.ltm_context}
-
-USER PROFILE:
-{context.profile_context}
-
-RAG CONTEXT:
-{context.rag_context}
-
-CONVERSATION METADATA:
-{context.conversation_metadata}
-"""
+    @staticmethod
+    def _render_history(context: AgentContext) -> str:
+        return "\n".join(f"{m.role.upper()}: {m.content}" for m in context.history)
 
     @staticmethod
     def _is_quota_error(exc: Exception) -> bool:
@@ -94,18 +94,6 @@ CONVERSATION METADATA:
         adk_agent.model = model
         return adk_agent
 
-    async def _ensure_session(self, context: AgentContext) -> None:
-        session = await self.session_service.get_session(
-            app_name=APP_NAME,
-            user_id=context.user_id,
-            session_id=context.conversation_id,
-        )
-        if session is None:
-            await self.session_service.create_session(
-                app_name=APP_NAME,
-                user_id=context.user_id,
-                session_id=context.conversation_id,
-            )
 
     async def _run_with_model(self, context: AgentContext, prompt: str, model: str) -> str:
         """Run one ADK turn on `model` without blocking the event loop."""
@@ -115,10 +103,12 @@ CONVERSATION METADATA:
             self.name, model, context.user_id, context.conversation_id, len(prompt),
         )
 
-        await self._ensure_session(context)
+        # Throwaway session: ADK needs one to run, but our DB is the history.
+        session_service = InMemorySessionService()
+        session = await session_service.create_session(app_name=APP_NAME, user_id=context.user_id)
         runner = Runner(
             agent=self._build_request_agent(context, model),
-            session_service=self.session_service,
+            session_service=session_service,
             app_name=APP_NAME,
         )
 
@@ -127,7 +117,7 @@ CONVERSATION METADATA:
         # being served. (The old sync runner.run() froze the whole server.)
         async for event in runner.run_async(
             user_id=context.user_id,
-            session_id=context.conversation_id,
+            session_id=session.id,
             new_message=Content(role="user", parts=[Part.from_text(text=prompt)]),
         ):
             # Read text Parts directly; str(event.content) would leak the object repr.
