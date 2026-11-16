@@ -1,0 +1,59 @@
+from __future__ import annotations
+from pydantic import BaseModel, ConfigDict, Field
+from typing import Literal
+from typing import List, Optional
+from uuid import UUID
+from datetime import datetime
+
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from app.schemas.file import FileRead
+    from app.schemas.message import MessageRead
+
+class ConversationCreate(BaseModel):
+    title: str
+    user_id: UUID
+    convo_metadata: Optional[dict] = None
+
+class ConversationRead(BaseModel):
+    id: UUID
+    title: str
+    created_at: datetime
+    updated_at: datetime
+    convo_metadata: Optional[dict] = None
+    user_id: UUID
+    messages: List["MessageRead"] = []
+    files: List["FileRead"] = []
+
+    model_config = ConfigDict(from_attributes=True)
+
+class ConversationBasicRead(BaseModel):
+    id: UUID
+    title: str
+    created_at: datetime
+    updated_at: datetime
+    convo_metadata: Optional[dict] = None
+    user_id: UUID
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class ConversationMetadata(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    topics: list[str] = Field(default_factory=list)
+    entities: list[str] = Field(default_factory=list)
+    active_goals: list[str] = Field(default_factory=list)
+
+    sentiment: Literal[
+        "positive",
+        "neutral",
+        "negative",
+        "mixed",
+    ] = "neutral"
+
+    summary_hint: str = ""
+
+from app.schemas.file import FileRead
+from app.schemas.message import MessageRead
+ConversationRead.update_forward_refs()
