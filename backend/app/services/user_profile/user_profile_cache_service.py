@@ -279,3 +279,56 @@ def schedule_user_profile_refresh(
     asyncio.create_task(
         refresh_user_profile_cache_with_new_session(user_id=user_id)
     )
+
+
+def _drop_items_from_missing_memories(profile_items: list[dict], active_memory_ids: set[str]) -> list[dict]:
+    """Keep message-derived items; keep memory-derived items only if their memory is still active."""
+    kept = []
+    for item in profile_items:
+        memory_id = (item.get("metadata") or {}).get("memory_id")
+        if memory_id and memory_id not in active_memory_ids:
+            continue
+        kept.append(item)
+    return kept
+
+
+async def rebuild_user_profile_cache(db, *, user_id):
+    """
+    Recompute the profile after memories were edited or deleted.
+
+    refresh_user_profile_cache() only MERGES new data into the cached items, so a
+    deleted memory would stay in the profile forever. Here we first drop items whose
+    source memory no longer exists or is inactive, then merge the active memories.
+    """
+    snapshot = await get_user_profile_snapshot(db, user_id=user_id)
+    active_memories = await get_memories_by_user(db, user_id=user_id, only_active=True)
+    active_ids = {str(memory.id) for memory in active_memories}
+
+    existing_items = _drop_items_from_missing_memories(
+        list(getattr(snapshot, "profile_items", []) or []),
+        active_ids,
+    )
+    merged_items = merge_profile_items_from_memories(existing_items, active_memories)
+    profile_relevant_count = sum(
+        1 for memory in active_memories if getattr(memory, "memory_type", None) in PROFILE_RELEVANT_TYPES
+    )
+    return await _persist_rendered_profile(
+        db,
+        user_id=user_id,
+        profile_items=merged_items,
+        source_memory_count=max(profile_relevant_count, len(merged_items)),
+    )
+
+
+async def remove_profile_items_by_value(db, *, user_id, value: str) -> int:
+    """Delete profile items (e.g. message-derived ones with no memory behind them) by exact value."""
+    snapshot = await get_user_profile_snapshot(db, user_id=user_id)
+    items = list(getattr(snapshot, "profile_items", []) or [])
+    target = value.strip().casefold()
+    kept = [item for item in items if str(item.get("value", "")).strip().casefold() != target]
+    removed = len(items) - len(kept)
+    if removed:
+        await _persist_rendered_profile(
+            db, user_id=user_id, profile_items=kept, source_memory_count=len(kept)
+        )
+    return removed

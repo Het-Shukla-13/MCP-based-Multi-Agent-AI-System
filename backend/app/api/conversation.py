@@ -5,10 +5,8 @@ from uuid import UUID
 from app.schemas.conversation import ConversationCreate, ConversationRead
 from app.crud.conversation import *
 from app.db.database import get_db
-from app.services.conversation.history_service import fetch_conversation_history
 from app.schemas.import_convo import ImportConversationRequest
-from app.schemas.message import MessageCreate
-from app.crud.message import create_message
+from app.services.conversation.transfer_service import export_conversation, import_messages
 
 router = APIRouter(prefix="/conversations", tags=["Conversations"])
 
@@ -53,47 +51,32 @@ async def delete(conversation_id: UUID, db: AsyncSession = Depends(get_db)):
         raise HTTPException(status_code=404, detail=str(e))
     
 @router.get("/{conversation_id}/export")
-async def export_conversation_api(
-    conversation_id: UUID,
-    db: AsyncSession = Depends(get_db),
-):
-    conversation = await get_conversation(db, conversation_id)
-    messages = await fetch_conversation_history(db, conversation_id, limit=1000)
+async def export_conversation_api(conversation_id: UUID, db: AsyncSession = Depends(get_db)):
+    return await export_conversation(db, conversation_id)
 
-    return {
-        "convo_metadata": conversation.convo_metadata,
-        "messages": [
-            {
-                "role": m.role,
-                "content": m.content,
-                "created_at": m.created_at.isoformat(),
-            }
-            for m in messages
-        ],
-    }
 
 @router.post("/{conversation_id}/import")
-async def import_conversation_api(
+async def import_into_conversation_api(
     conversation_id: UUID,
     payload: ImportConversationRequest,
     db: AsyncSession = Depends(get_db),
 ):
-    conversation = await get_conversation(db, conversation_id)
-    if payload.convo_metadata is not None:
-        conversation.convo_metadata = payload.convo_metadata
-        await db.commit()
+    """Append imported messages to an existing conversation."""
+    conversation = await get_conversation(db, conversation_id)  # 404 if missing
+    count = await import_messages(db, conversation=conversation, payload=payload)
+    return {"status": "imported", "conversation_id": str(conversation.id), "message_count": count}
 
-    for msg in payload.messages:
-        await create_message(
-            db,
-            MessageCreate(
-                conversation_id=conversation_id,
-                role=msg.role,
-                content=msg.content,
-                user_id=conversation.user_id,
-                token_count=0,
-                file_ids=[],
-            ),
-        )
 
-    return {"status": "imported"}
+@router.post("/import", status_code=201)
+async def import_as_new_conversation_api(
+    user_id: UUID,
+    payload: ImportConversationRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Create a new conversation from an exported file."""
+    conversation = await create_conversation(
+        db, ConversationCreate(title=payload.title or "Imported conversation", user_id=user_id)
+    )
+    conversation = await get_conversation(db, conversation.id)
+    count = await import_messages(db, conversation=conversation, payload=payload)
+    return {"status": "imported", "conversation_id": str(conversation.id), "message_count": count}

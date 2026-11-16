@@ -1,25 +1,25 @@
-from enum import Enum
+from enum import StrEnum
 
-class MemoryType(str, Enum):
+class MemoryType(StrEnum):
     preference = "preference"
     fact = "fact"
     decision = "decision"
     task = "task"
 
 
-class EvidenceType(str, Enum):
+class EvidenceType(StrEnum):
     explicit = "explicit"
     repeated = "repeated"
     inferred = "inferred"
 
 
-class TemporalScope(str, Enum):
+class TemporalScope(StrEnum):
     durable = "durable"
     ongoing = "ongoing"
     temporary = "temporary"
 
 
-class SourceKind(str, Enum):
+class SourceKind(StrEnum):
     statement = "statement"
     question = "question"
     request = "request"
@@ -28,18 +28,18 @@ class SourceKind(str, Enum):
     unclear = "unclear"
 
 
-class ValueSpecificity(str, Enum):
+class ValueSpecificity(StrEnum):
     concrete = "concrete"
     vague = "vague"
 
 
-class OverwriteRisk(str, Enum):
+class OverwriteRisk(StrEnum):
     none = "none"
     low = "low"
     high = "high"
 
 
-class ProfileCategory(str, Enum):
+class ProfileCategory(StrEnum):
     identity = "identity"
     preference = "preference"
     project = "project"

@@ -12,6 +12,7 @@ One note per branch, in the order the work was done. Each note covers: the conce
 | 06 | `fix/file-attachments-and-types` | Streaming uploads, magic bytes, dependencies, Future exceptions, Celery queues |
 | 07 | `chore/cleanup` | Direct vs transitive deps, extras, strip_headers bug, stale tests |
 | 08 | `feature/agent-context-wiring` | DB as single source of history, rules vs LLM decisions, relevance thresholds |
+| 09 | `feature/memory-management-api` | Derived data, re-embedding, StrEnum (3.11 change), export formats |
 
 ## Branching workflow
 - `develop-be` is cut from `main`, with the latest feature branch merged in.
