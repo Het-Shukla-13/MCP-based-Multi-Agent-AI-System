@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import { generatedFileUrl } from "../lib/api";
 import { agentIcon, agentLabel, describeStatus } from "../lib/agents";
+import MarkdownMessage from "./MarkdownMessage";
 
 function formatTime(value) {
   if (!value) return "";
@@ -99,8 +100,8 @@ export default function MessageList({ agentStatus, agents, conversation, isLoadi
                 </span>
                 <span className="message-time">{message.pending ? "Sending..." : formatTime(message.created_at)}</span>
               </div>
-              <div className="message-body">
-                {renderContentWithLinks(message.content)}
+              <div className={`message-body${isAssistant ? " message-body--markdown" : ""}`}>
+                {isAssistant ? <MarkdownMessage content={message.content} /> : renderContentWithLinks(message.content)}
                 {message.streaming ? <span className="stream-cursor" aria-hidden="true">▍</span> : null}
               </div>
               {message.files?.length ? (

@@ -23,6 +23,7 @@ One note per branch, in the order the work was done. Each note covers: the conce
 | 17 | `docs/architecture` | Diagrams as code (Mermaid), design decisions, requirements mapping |
 | 18 | `feature/fe-auth` | Interceptors, tokens in URLs, case-sensitive imports, CORS-masked 500s |
 | 19 | `feature/fe-streaming` | WebSocket event handling, draft vs saved messages, derived state |
+| 20 | `feature/fe-markdown` | Safe Markdown rendering, no raw HTML, tokenised file URLs, memo |
 
 ## Branching workflow
 - `develop-be` is cut from `main`, with the latest feature branch merged in.
