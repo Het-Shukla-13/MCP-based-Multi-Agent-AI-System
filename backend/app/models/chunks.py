@@ -6,7 +6,9 @@ from sqlalchemy import JSON, Column, ForeignKey, Index, Text
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlmodel import Field, SQLModel
 
-EMBEDDING_DIM = 384
+from app.core.config import settings
+
+EMBEDDING_DIM = settings.EMBEDDING_DIM
 
 
 class Chunk(SQLModel, table=True):

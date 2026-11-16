@@ -10,9 +10,8 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 import pandas as pd
 from app.services.file_processing.tabular import read_csv_robust
 from docx import Document
-import pytesseract
 from fastapi import HTTPException
-from PIL import Image
+from app.services.vision.vision_service import transcribe_image
 from app.services.file_processing.file_chunkers import *
 from app.services.file_processing.file_chunkers import chunk_sections
 
@@ -26,8 +25,36 @@ def validate_office_archive(file_path: str) -> None:
     if total_uncompressed_size > MAX_OFFICE_UNCOMPRESSED_BYTES:
         raise HTTPException(status_code=400, detail="Office file is too large to process safely")
 
+MAX_SCANNED_PDF_PAGES = 10  # vision calls per scanned PDF (free-tier protection)
+
+
+def pdf_to_markdown(file_path: str) -> str:
+    """
+    Text PDFs: pymupdf4llm with OCR disabled (its default silently runs local Tesseract).
+    Scanned PDFs (no text layer): render pages to PNG and transcribe with Gemini vision.
+    """
+    text = pymupdf4llm.to_markdown(file_path, use_ocr=False)
+    if len(text.strip()) >= 50:
+        return text
+
+    import os
+    import tempfile
+    import fitz
+
+    pages = []
+    with fitz.open(file_path) as doc, tempfile.TemporaryDirectory() as tmp:
+        for index, page in enumerate(doc):
+            if index >= MAX_SCANNED_PDF_PAGES:
+                pages.append(f"[Only the first {MAX_SCANNED_PDF_PAGES} scanned pages were transcribed.]")
+                break
+            image_path = os.path.join(tmp, f"page-{index + 1}.png")
+            page.get_pixmap(dpi=150).save(image_path)
+            pages.append(f"# Page {index + 1}\n{transcribe_image(image_path)}")
+    return "\n\n".join(pages)
+
+
 def parse_pdf(file_path: str) -> List[Dict]:
-    pdf_txt=pymupdf4llm.to_markdown(file_path)
+    pdf_txt=pdf_to_markdown(file_path)
     lines = pdf_txt.split("\n")
     sections = []
     current_section = {
@@ -157,8 +184,8 @@ def process_text(file_path: str) -> list[str]:
     return chunks
 
 def process_image(file_path: str) -> list[str]:
-    image = Image.open(file_path).convert("RGB")
-    img_text = pytesseract.image_to_string(image).strip()
+    # Gemini vision instead of local Tesseract OCR: reads text AND describes charts/photos.
+    img_text = transcribe_image(file_path)
     if not img_text:
         return []
     chunks=recursive_character_chunking_for_images(img_text)

@@ -37,3 +37,21 @@ def test_memory_extraction_keeps_valid_items_when_one_is_invalid(monkeypatch):
     monkeypatch.setattr(memory_extractor, "get_llm_response_async", fake_llm)
     memories = asyncio.run(memory_extractor.extract_memories_from_text("user: I like Python"))
     assert [m.content for m in memories] == ["User likes Python."]
+
+
+def test_compatible_more_detailed_memory_is_treated_as_refinement(monkeypatch):
+    from types import SimpleNamespace
+    from app.schemas.memory import MemoryComparisonResult
+    from app.services.memory import ltm_service
+
+    async def fake_compare(**kwargs):
+        return MemoryComparisonResult(relationship="compatible", confidence=0.95, reason="adds detail")
+
+    monkeypatch.setattr(ltm_service, "compare_memories", fake_compare)
+    old = SimpleNamespace(content="User prefers Python.")
+    matched, comparison, _ = asyncio.run(ltm_service._check_duplicate_candidates(
+        content="User prefers Python and says it is their favourite language.",
+        memory_type="preference",
+        similar_matches=[{"memory": old, "distance": 0.22}],
+    ))
+    assert matched is old and comparison["relationship"] == "refinement"

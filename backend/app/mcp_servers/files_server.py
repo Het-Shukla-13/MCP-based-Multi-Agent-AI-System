@@ -28,8 +28,8 @@ mcp = FastMCP("files")
 
 def _extract_text(path: str, ext: str) -> str:
     if ext == ".pdf":
-        import pymupdf4llm
-        return pymupdf4llm.to_markdown(path)
+        from app.services.file_processing.file_processors import pdf_to_markdown
+        return pdf_to_markdown(path)
     if ext == ".docx":
         from docx import Document
         return "\n".join(p.text for p in Document(path).paragraphs)
@@ -39,9 +39,8 @@ def _extract_text(path: str, ext: str) -> str:
         sheets = pd.read_excel(path, sheet_name=None)
         return "\n\n".join(f"## Sheet: {name}\n{df.head(200).to_csv(index=False)}" for name, df in sheets.items())
     if ext in {".jpg", ".jpeg", ".png"}:
-        import pytesseract
-        from PIL import Image
-        return pytesseract.image_to_string(Image.open(path).convert("RGB"))
+        from app.services.vision.vision_service import transcribe_image
+        return transcribe_image(path)
     with open(path, encoding="utf-8", errors="replace") as fh:
         return fh.read()
 

@@ -56,4 +56,4 @@ class ConversationMetadata(BaseModel):
 
 from app.schemas.file import FileRead
 from app.schemas.message import MessageRead
-ConversationRead.update_forward_refs()
+ConversationRead.model_rebuild()
