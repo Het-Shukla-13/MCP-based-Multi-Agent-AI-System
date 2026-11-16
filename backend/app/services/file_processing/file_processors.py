@@ -7,7 +7,6 @@ from uuid import uuid4
 from typing import List, Dict
 import pymupdf4llm
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-import PyPDF2
 import pandas as pd
 from docx import Document
 import pytesseract
