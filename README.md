@@ -1,178 +1,198 @@
-#### AI-ChatBot System:
+# MCP-based Multi-Agent AI System
 
-## Project Structure:
+A chat assistant where a **root agent** routes every message to one of six specialised **Google ADK** agents. The agents use real tools served by **MCP servers**, remember users across conversations with a **short- and long-term memory** system, and can read uploaded files and generate new ones. Everything runs on **free tiers and open-source software**, with no locally hosted models.
 
-```text
-.
-├── backend
-│   ├── alembic.ini
-│   ├── app
-│   │   ├── __init__.py
-│   │   ├── api
-│   │   │   ├── chat.py
-│   │   │   ├── conversation.py
-│   │   │   ├── file_generation.py
-│   │   │   ├── file.py
-│   │   │   ├── memory.py
-│   │   │   ├── message.py
-│   │   │   ├── user.py
-│   │   │   └── ws.py
-│   │   ├── core
-│   │   │   ├── celery_app.py
-│   │   │   ├── config.py
-│   │   │   ├── logging.py
-│   │   │   ├── openapi.py
-│   │   │   └── websocket.py
-│   │   ├── crud
-│   │   │   ├── conversation.py
-│   │   │   ├── file.py
-│   │   │   ├── memory.py
-│   │   │   ├── message.py
-│   │   │   ├── user_profile_snapshot.py
-│   │   │   └── user.py
-│   │   ├── db
-│   │   │   ├── database.py
-│   │   │   └── models
-│   │   │       ├── __init__.py
-│   │   │       ├── chunks.py
-│   │   │       ├── conversation.py
-│   │   │       ├── file.py
-│   │   │       ├── memory.py
-│   │   │       ├── message.py
-│   │   │       ├── user_profile_snapshot.py
-│   │   │       └── user.py
-│   │   ├── enums
-│   │   │   ├── __init__.py
-│   │   │   └── memory.py
-│   │   ├── prompts
-│   │   │   ├── __init__.py
-│   │   │   ├── chat.py
-│   │   │   ├── context_router.py
-│   │   │   ├── conversation_metadata.py
-│   │   │   ├── file_generation.py
-│   │   │   ├── intent_classification.py
-│   │   │   ├── memory_comparison.py
-│   │   │   ├── memory_extraction.py
-│   │   │   ├── metadata_annotation.py
-│   │   │   ├── profile_candidate.py
-│   │   │   └── summarization.py
-│   │   ├── schemas
-│   │   │   ├── __init__.py
-│   │   │   ├── conversation.py
-│   │   │   ├── file_generation.py
-│   │   │   ├── file.py
-│   │   │   ├── import_convo.py
-│   │   │   ├── llm.py
-│   │   │   ├── memory.py
-│   │   │   ├── message.py
-│   │   │   ├── profile.py
-│   │   │   └── user.py
-│   │   ├── services
-│   │   │   ├── conversation
-│   │   │   │   ├── conversation_metadata_extractor.py
-│   │   │   │   ├── conversation_metadata_service.py
-│   │   │   │   ├── conversation_summary_memory_service.py
-│   │   │   │   └── history_service.py
-│   │   │   ├── embeddings
-│   │   │   │   └── embedding_utils.py
-│   │   │   ├── file_generation
-│   │   │   │   ├── __init__.py
-│   │   │   │   ├── file_generation_service.py
-│   │   │   │   ├── file_renderer.py
-│   │   │   │   └── intent_router.py
-│   │   │   ├── file_processing
-│   │   │   │   ├── file_chunkers.py
-│   │   │   │   ├── file_processing_service.py
-│   │   │   │   ├── file_processors.py
-│   │   │   │   ├── file_task_dispatcher.py
-│   │   │   │   └── file_type_config.py
-│   │   │   ├── llm
-│   │   │   │   ├── __init__.py
-│   │   │   │   ├── base.py
-│   │   │   │   ├── llm_service.py
-│   │   │   │   └── service.py
-│   │   │   ├── memory
-│   │   │   │   ├── background_memory_pipeline.py
-│   │   │   │   ├── context_router.py
-│   │   │   │   ├── lifecycle_service.py
-│   │   │   │   ├── ltm_service.py
-│   │   │   │   ├── memory_comparator.py
-│   │   │   │   ├── memory_extractor.py
-│   │   │   │   ├── memory_metadata_annotator.py
-│   │   │   │   ├── memory_promoter.py
-│   │   │   │   ├── memory_services.py
-│   │   │   │   └── unified_memory_service.py
-│   │   │   ├── message
-│   │   │   │   └── message_service.py
-│   │   │   ├── rag
-│   │   │   │   └── retriever.py
-│   │   │   ├── summarization
-│   │   │   │   └── summarization_service.py
-│   │   │   ├── time
-│   │   │   │   └── timing.py
-│   │   │   ├── tokenization
-│   │   │   │   ├── token_service.py
-│   │   │   │   └── tokenizer.py
-│   │   │   └── user_profile
-│   │   │       ├── profile_candidate_extractor.py
-│   │   │       ├── profile_renderer.py
-│   │   │       ├── profile_resolver.py
-│   │   │       ├── user_profile_cache_service.py
-│   │   │       └── user_profile_service.py
-│   │   └── tasks
-│   │       └── file_tasks.py
-│   ├── main.py
-│   ├── migrations
-│   │   ├── env.py
-│   │   ├── README
-│   │   ├── script.py.mako
-│   │   └── versions
-│   │       ├── 08a95a832340_add_chunk_table.py
-│   │       ├── 2f7fda260737_add_chunk_table.py
-│   │       ├── 4f6e1c2b7d91_add_profile_items_to_user_profile_snapshot.py
-│   │       ├── 6190823fd0cf_fixed_metadata_column_name.py
-│   │       ├── 7427d97cd004_add_memory_vector_index.py
-│   │       ├── 8172e3e4f9ce_add_memory_table.py
-│   │       ├── 84b87b0473aa_merge_heads.py
-│   │       ├── 8a51062bf617_added_role_field_to_message.py
-│   │       ├── 971acdcdd25c_add_chunk_table.py
-│   │       ├── be272f9da3f2_init.py
-│   │       ├── c96bd23576a3_added_user_profile_snapshot.py
-│   │       ├── e4ec87f109f1_add_vector_index.py
-│   │       └── f1307cce4c40_fix_memory_table.py
-│   ├── requirements.txt
-│   ├── scripts
-│   │   └── backfill_profile_metadata.py
-│   └── tests
-│       ├── test_context_router.py
-│       └── test_file_generation_serializer.py
-├── docker-compose.yaml
-└── frontend
-    ├── eslint.config.js
-    ├── index.html
-    ├── package-lock.json
-    ├── package.json
-    ├── public
-    │   ├── favicon.svg
-    │   └── icons.svg
-    ├── README.md
-    ├── src
-    │   ├── App.jsx
-    │   ├── components
-    │   │   ├── ChatWindow.jsx
-    │   │   ├── MessageInput.jsx
-    │   │   ├── MessageList.jsx
-    │   │   └── SideBar.jsx
-    │   ├── hooks
-    │   │   ├── useConversationSocket.js
-    │   │   ├── useConversationUploads.js
-    │   │   └── useFileGeneration.js
-    │   ├── lib
-    │   │   ├── api.js
-    │   │   └── socket.js
-    │   ├── main.jsx
-    │   ├── pages
-    │   │   └── ChatPage.jsx
-    │   └── styles.css
-    └── vite.config.js
+> Learning notes for every change live in [`docs/learning/`](docs/learning/README.md).
+
+---
+
+## Architecture
+
+```mermaid
+flowchart LR
+    subgraph Client
+        UI["React + Vite UI"]
+    end
+
+    subgraph API["FastAPI backend"]
+        AUTH["Auth: Argon2id + JWT<br/>owner-scoped routes"]
+        WS["WebSocket /ws/{conversation}<br/>status · chat_delta · chat"]
+        MSG["Message service"]
+        MEM["Unified memory<br/>STM window + rolling summary<br/>LTM + profile + related convos"]
+        RAG["RAG retriever"]
+        ROOT["Root agent (ADK)<br/>transfer_to_agent"]
+        AGENTS["general · code · data<br/>research · document · image"]
+        BG["Background pipeline<br/>memory extraction · dedup/refine<br/>conflicts · metadata · profile"]
+    end
+
+    subgraph MCP["MCP servers (stdio, JSON-RPC)"]
+        FILES["files"]
+        DATA["data (pandas)"]
+        WEB["web (search + fetch)"]
+        CODE["code (tree-sitter)"]
+        IMG["image (vision + gen)"]
+        ART["artifacts (files, templates, PDF)"]
+    end
+
+    subgraph Ingest["File ingestion"]
+        UP["Upload: stream, 7 MB cap<br/>magic-byte validation"]
+        Q["Celery / local thread pool"]
+        PARSE["Parse + chunk<br/>PDF · DOCX · code AST · CSV/XLSX · images"]
+    end
+
+    subgraph Store["PostgreSQL 16 + pgvector"]
+        DB[("users · conversations · messages<br/>files · chunks · memories · profiles")]
+        VEC[("HNSW indexes<br/>chunks: cosine · memories: L2")]
+    end
+
+    subgraph Ext["Free external services"]
+        GEM["Gemini<br/>agents · router · vision · embeddings"]
+        GROQ["Groq gpt-oss-20b<br/>background LLM jobs"]
+        DDG["ddgs metasearch<br/>+ Wikipedia API"]
+        POL["Pollinations.ai<br/>image generation"]
+    end
+
+    UI -- "JWT" --> AUTH
+    UI <--> WS --> MSG
+    MSG --> MEM & RAG --> DB
+    MSG --> ROOT --> AGENTS
+    AGENTS -- "McpToolset<br/>(identity injected)" --> MCP
+    AGENTS --> GEM
+    ROOT --> GEM
+    MSG -. "after reply" .-> BG --> GROQ
+    BG --> DB
+    UI -- "upload" --> UP --> Q --> PARSE --> GEM
+    PARSE --> VEC
+    FILES & DATA & CODE --> DB
+    WEB --> DDG
+    IMG --> GEM & POL
+    ART --> DB
+    MEM --> VEC
+    RAG --> VEC
+```
+
+### Life of a message
+```mermaid
+sequenceDiagram
+    participant U as Browser
+    participant W as WebSocket
+    participant M as Message service
+    participant R as Root agent
+    participant A as Chosen agent
+    participant T as MCP server
+    U->>W: {"content": "Top regions in sales.csv as a PDF"}
+    W->>M: authenticated user (token)
+    M->>M: save message, @mention?, build memory + RAG context
+    M->>R: AgentContext (history, STM, LTM, profile, files)
+    R-->>U: agent_status: routing
+    R->>A: transfer_to_agent("data")
+    A-->>U: agent_status: working / tool
+    A->>T: table_info → aggregate → create_file
+    T-->>A: results + generated_file_id
+    A-->>U: chat_delta … (streamed text)
+    M-->>U: chat (saved reply + attached PDF)
+    M--)M: background: memories, metadata, profile
+```
+
+### Key design decisions
+| Area | Decision | Why |
+|---|---|---|
+| Agents | ADK root with `sub_agents`; per-request agent objects | Native delegation; no shared mutable state between users |
+| History | Our DB is the only source (ADK sessions are throwaway) | Survives restarts; shared when agents switch; token-bounded |
+| Memory context | Always retrieve, filter by calibrated distance | Saves an LLM call per turn; deterministic and testable |
+| Tools | MCP servers; one process per server, per-agent filtered views | Standard protocol; least privilege |
+| Tool security | Identity args overwritten server-side; SSRF guard; no code execution | Prompt injection can't cross users or reach internal services |
+| Embeddings | Gemini `gemini-embedding-001`, 768-d, normalised | Spec requirement; no local model; rate-limited client |
+| Auth | Argon2id + JWT; owner-scoped queries; 404 for not-owned | Identity never trusted from the client |
+| Models | Gemini for chat-facing work, Groq for background jobs | Spreads per-model free-tier quotas; automatic fallbacks |
+
+---
+
+## Requirements coverage
+
+| Requirement | Where |
+|---|---|
+| PostgreSQL + vector DB | `models/`, pgvector HNSW (`migrations/`) |
+| WebSocket real-time + streaming | `api/ws.py` (`agent_status`, `chat_delta`, `chat`) |
+| Per-user chat storage, auth | `api/deps.py`, `api/auth.py`, `core/security.py` |
+| Multi-file upload, validation, 7 MB limit | `api/file.py`, `crud/file.py`, `file_validation.py` |
+| Async processing queue | `file_task_dispatcher.py` (Celery or local pool), `file_ingestion.py` |
+| PDF / DOCX / images (vision) / code / CSV / XLSX parsing + chunking | `services/file_processing/`, `services/vision/` |
+| Gemini embeddings + vector store + retrieval | `services/embeddings/`, `services/rag/retriever.py` |
+| STM: buffer, token counting, summarisation, rolling window | `services/memory/memory_services.py`, `services/tokenization/` |
+| LTM: semantic search, ranking, update/delete, profile | `services/memory/ltm_service.py`, `api/memory.py`, `services/user_profile/` |
+| Unified STM+LTM, auto-promotion, metadata | `unified_memory_service.py`, `background_memory_pipeline.py` |
+| Export / import | `services/conversation/transfer_service.py` |
+| Context-aware file generation, templates, preview, MIME, naming | `mcp_servers/artifacts_server.py`, `file_generation/`, `api/file_generation.py` |
+| ADK agents, registry, root routing, state, 6 agent types | `agent_layer/` |
+| @mention, switching, status indicators | `core/mentions.py`, `root_agent.py`, WebSocket events |
+| MCP client + per-agent tools + chaining | `agent_layer/tools/mcp_registry.py`, `mcp_servers/` |
+
+---
+
+## Running locally
+
+**Prerequisites:** Docker, Python 3.12, [uv](https://docs.astral.sh/uv/), Node 20+. You also need free API keys from [Groq](https://console.groq.com/keys) and [Google AI Studio](https://aistudio.google.com/apikey).
+
+```bash
+# 1. Database + Redis
+cp .env.example .env            # POSTGRES_* values
+docker compose up -d            # Postgres+pgvector on :5433, Redis on :6379
+
+# 2. Backend
+cd backend
+cp .env.example .env            # fill keys + JWT_SECRET (command is in the file)
+uv venv --python 3.12 .venv
+uv pip install --python .venv/bin/python -r requirements-dev.txt
+.venv/bin/alembic upgrade head
+.venv/bin/uvicorn main:app --reload --port 8000
+
+# 3. Background worker (only when FILE_PROCESSING_BACKEND="celery")
+.venv/bin/celery -A app.core.celery_app.celery_app worker --pool=solo --loglevel=info
+
+# 4. Tests
+.venv/bin/python -m pytest -q
+```
+API docs: http://localhost:8000/docs. Click **Authorize** and paste the `access_token` from `/auth/login`. The MCP servers start automatically as child processes of the API.
+
+After changing `EMBEDDING_MODEL` or `EMBEDDING_DIM`, run a migration and then `.venv/bin/python -m scripts.reembed`.
+
+## WebSocket protocol
+```
+connect  ws://localhost:8000/ws/{conversation_id}?token=<access_token>
+send     {"content": "...", "file_ids": [...], "selected_agent": "code"?, "format": "pdf"?}
+receive  {"type":"agent_status","data":{"status":"routing|working|tool","agent":..,"tool":..}}
+         {"type":"chat_delta","data":{"agent":..,"text":..}}          (streamed pieces)
+         {"type":"chat","data":{"user_message":..,"ai_message":..,"active_agent":..,"error":bool}}
+```
+
+## Free-tier notes (measured)
+| Service | Limit / caveat |
+|---|---|
+| Gemini embeddings | 100 texts/min (each text in a batch counts); client limiter at 90/min |
+| Gemini image generation | free quota is 0, so Pollinations.ai is used instead (watermarked, third-party) |
+| ddgs web search | engines rate-limit intermittently, so it tries 6 engines, then the Wikipedia API |
+| Gemini / Groq chat models | occasional 503 "high demand", handled by automatic fallback models |
+
+## Project structure
+```
+backend/
+├── main.py                     FastAPI app, routers, shutdown hooks
+├── app/
+│   ├── api/                    HTTP + WebSocket routes, auth dependencies
+│   ├── agent_layer/
+│   │   ├── agents/             root (ADK delegation) + 6 specialised agents
+│   │   ├── core/               BaseAgent, registry, mentions, agent state
+│   │   └── tools/              MCP client registry (per-agent toolsets)
+│   ├── mcp_servers/            files, data, web, code, image, artifacts (FastMCP)
+│   ├── services/               memory, rag, embeddings, vision, file processing,
+│   │                           file generation, llm, conversation, user profile
+│   ├── models/ schemas/ crud/  SQLModel tables, Pydantic I/O, DB access
+│   ├── core/                   config, security, celery, logging
+│   └── prompts/                LLM prompts for background jobs
+├── migrations/                 Alembic (baseline + changes)
+├── scripts/reembed.py          refill embeddings after a model change
+└── tests/                      unit tests (pytest)
+frontend/                       React + Vite chat UI
+docs/learning/                  one learning note per branch
 ```
