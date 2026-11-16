@@ -1,49 +1,43 @@
-from fastapi import APIRouter, Depends, HTTPException
-from sqlmodel.ext.asyncio.session import AsyncSession
-from uuid import UUID
-from typing import List
+"""Account management for the signed-in user only (no listing or editing other users)."""
 
-from app.schemas.user import UserCreate, UserRead
-from app.crud.user import *
+from fastapi import APIRouter, Depends, HTTPException, Response
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlmodel import select
+
+from app.api.deps import get_current_user
+from app.core.security import hash_password, verify_password
 from app.db.database import get_db
+from app.models import User
+from app.schemas.user import UserRead, UserUpdate
 
 router = APIRouter(prefix="/users", tags=["Users"])
 
-@router.post("/", response_model=UserRead)
-async def create(payload: UserCreate, db: AsyncSession = Depends(get_db)):
-    try:
-        user = await create_user(db, payload)
-    except Exception as e:
-        raise e
+
+@router.get("/me", response_model=UserRead)
+async def read_me(user: User = Depends(get_current_user)):
     return user
 
-@router.get("/{user_id}", response_model=UserRead)
-async def read(user_id: UUID, db: AsyncSession = Depends(get_db)):
-    try:
-        user = await get_user(db, user_id)
-    except Exception as e:
-        raise e
+
+@router.patch("/me", response_model=UserRead)
+async def update_me(payload: UserUpdate, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    # Re-authenticate: a stolen token alone must not be enough to take over the account.
+    if not verify_password(payload.current_password, user.password_hash):
+        raise HTTPException(status_code=400, detail="Current password is incorrect")
+    if payload.email and payload.email.lower() != user.email:
+        taken = (await db.execute(select(User).where(User.email == payload.email.lower()))).scalar_one_or_none()
+        if taken:
+            raise HTTPException(status_code=400, detail="Email already in use")
+        user.email = payload.email.lower()
+    if payload.new_password:
+        user.password_hash = hash_password(payload.new_password)
+    db.add(user)
+    await db.commit()
+    await db.refresh(user)
     return user
 
-@router.get("/", response_model=List[UserRead])
-async def read_all(db: AsyncSession = Depends(get_db)):
-    try:
-        users = await get_users(db)
-    except Exception as e:
-        raise e
-    return users
 
-@router.put("/{user_id}", response_model=UserRead)
-async def update(user_id: UUID, email: str, password: str, is_active: bool, db: AsyncSession = Depends(get_db)):
-    try:
-        updated_user = await update_user(db, user_id, email=email, password=password, is_active=is_active)
-        return updated_user
-    except Exception as e:
-        raise e
-    
-@router.delete("/{user_id}")
-async def delete(user_id: UUID, db: AsyncSession = Depends(get_db)):
-    try:
-        await delete_user(db, user_id)
-    except Exception as e:
-        raise e
+@router.delete("/me", status_code=204)
+async def delete_me(user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    await db.delete(user)
+    await db.commit()
+    return Response(status_code=204)

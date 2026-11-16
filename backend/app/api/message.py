@@ -1,49 +1,34 @@
-from fastapi import APIRouter, Depends, HTTPException
-from sqlmodel.ext.asyncio.session import AsyncSession
-from typing import List
+"""Read/delete your own messages. New messages go through /chat/send or the WebSocket,
+so they always pass through the agents and the memory pipeline."""
+
 from uuid import UUID
 
-from app.schemas.message import MessageCreate, MessageRead
-from app.crud.message import *
+from fastapi import APIRouter, Depends, Response
+from sqlmodel.ext.asyncio.session import AsyncSession
+
+from app.api.deps import get_current_user, owned_conversation, owned_message
+from app.crud.message import delete_message, get_message, get_messages
 from app.db.database import get_db
+from app.models import User
+from app.schemas.message import MessageRead
 
 router = APIRouter(prefix="/messages", tags=["Messages"])
 
-@router.post("/", response_model=MessageRead)
-async def create(payload: MessageCreate, db: AsyncSession = Depends(get_db)):
-    try:
-        message = await create_message(db, payload)
-    except Exception as e:
-        raise e
-    return message
+
+@router.get("/", response_model=list[MessageRead])
+async def read_all(conversation_id: UUID, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    await owned_conversation(db, conversation_id, user)
+    return await get_messages(db, conversation_id)
+
 
 @router.get("/{message_id}", response_model=MessageRead)
-async def read(message_id: str, db: AsyncSession = Depends(get_db)):
-    try:
-        message = await get_message(db, message_id)
-    except Exception as e:
-        raise HTTPException(status_code=404, detail=str(e))
-    return message
+async def read(message_id: UUID, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    await owned_message(db, message_id, user)
+    return await get_message(db, message_id)
 
-@router.get("/", response_model=List[MessageRead])
-async def read_all(conversation_id: UUID, db: AsyncSession = Depends(get_db)):
-    try:
-        messages = await get_messages(db, conversation_id)
-    except Exception as e:
-        raise HTTPException(status_code=404, detail=str(e))
-    return messages
 
-@router.put("/{message_id}")
-async def update(message_id: UUID, file_ids: list[UUID] | None = None, content: str | None = None, db: AsyncSession = Depends(get_db)):
-    try:
-        updated_message = await update_message(db, message_id, content=content, file_ids=file_ids)
-        return updated_message
-    except Exception as e:
-        raise HTTPException(status_code=404, detail=str(e))
-    
-@router.delete("/{message_id}")
-async def delete(message_id: UUID, db: AsyncSession = Depends(get_db)):
-    try:
-        await delete_message(db, message_id)
-    except Exception as e:
-        raise HTTPException(status_code=404, detail=str(e))
+@router.delete("/{message_id}", status_code=204)
+async def delete(message_id: UUID, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    await owned_message(db, message_id, user)
+    await delete_message(db, message_id)
+    return Response(status_code=204)

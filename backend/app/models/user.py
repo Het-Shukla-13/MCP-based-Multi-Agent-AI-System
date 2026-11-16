@@ -14,7 +14,8 @@ class User(SQLModel, table=True):
 
     id: UUID = Field(default_factory=uuid4, sa_column=Column(PGUUID(as_uuid=True), nullable=False, primary_key=True, index=True))
     email: str = Field(sa_column=Column(String, nullable=False, unique=True, index=True))
-    password: str = Field(sa_column=Column(String, nullable=False))
+    # Argon2id hash (never the password itself). See app/core/security.py.
+    password_hash: str = Field(sa_column=Column(String, nullable=False))
     created_at: datetime = Field(default_factory=datetime.utcnow, sa_column=Column(DateTime, nullable=False))
     is_active: bool = Field(default=True, sa_column=Column(Boolean, default=True, nullable=False))
 

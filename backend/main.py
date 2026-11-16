@@ -3,6 +3,7 @@ from fastapi.openapi.utils import get_openapi
 from app.core.config import settings
 from app.core.logging import setup_logging
 from app.core.openapi import normalize_binary_upload_schema
+from app.api.auth import router as auth_router
 from app.api.ws import router as ws_router
 from app.api.conversation import router as conversation_router
 from app.api.user import router as user_router
@@ -26,6 +27,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.include_router(auth_router)
 app.include_router(ws_router)
 app.include_router(conversation_router)
 app.include_router(user_router)

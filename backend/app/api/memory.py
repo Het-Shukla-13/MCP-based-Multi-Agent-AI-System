@@ -7,7 +7,7 @@ The profile is NOT edited directly: it's computed from active memories
 Editing a memory then rebuilding the cache is the single, consistent way to
 change what the assistant "knows" about a user.
 
-Note: no authentication yet (added in feature/auth); user_id is trusted.
+All routes act on the authenticated user only (identity from the access token).
 """
 
 from uuid import UUID
@@ -15,7 +15,9 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.crud.memory import delete_memory, get_memories_by_user, get_memory, touch_memory
+from app.api.deps import get_current_user, owned_memory
+from app.crud.memory import delete_memory, get_memories_by_user, touch_memory
+from app.models import User
 from app.crud.user_profile_snapshot import get_user_profile_snapshot
 from app.db.database import get_db
 from app.enums import MemoryType
@@ -52,14 +54,14 @@ def _manual_memory_metadata(memory_type: MemoryType) -> dict:
 
 @router.get("", response_model=list[MemoryOut])
 async def list_memories(
-    user_id: UUID,
     memory_type: MemoryType | None = None,
     include_inactive: bool = False,
+    user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     memories = await get_memories_by_user(
         db,
-        user_id=user_id,
+        user_id=user.id,
         memory_type=memory_type.value if memory_type else None,
         only_active=not include_inactive,
     )
@@ -68,15 +70,15 @@ async def list_memories(
 
 @router.get("/search", response_model=list[MemoryOut])
 async def search_memories(
-    user_id: UUID,
     query: str = Query(min_length=1),
     top_k: int = Query(default=5, ge=1, le=50),
     memory_type: MemoryType | None = None,
+    user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     results = await search_memories_with_scores(
         db,
-        user_id=user_id,
+        user_id=user.id,
         query_text=query,
         top_k=top_k,
         memory_type=memory_type.value if memory_type else None,
@@ -88,11 +90,12 @@ async def search_memories(
 
 
 @router.post("", response_model=MemoryOut, status_code=201)
-async def create_memory(payload: MemoryCreateRequest, db: AsyncSession = Depends(get_db)):
+async def create_memory(payload: MemoryCreateRequest, user: User = Depends(get_current_user),
+                        db: AsyncSession = Depends(get_db)):
     """Manually teach the assistant something (source='user')."""
     memory = await create_memory_with_embedding(
         db,
-        user_id=payload.user_id,
+        user_id=user.id,
         content=payload.content,
         memory_type=payload.memory_type.value,
         memory_metadata={**_manual_memory_metadata(payload.memory_type), **payload.memory_metadata},
@@ -101,13 +104,14 @@ async def create_memory(payload: MemoryCreateRequest, db: AsyncSession = Depends
     )
     if memory is None:
         raise HTTPException(status_code=400, detail="Memory content is empty")
-    await rebuild_user_profile_cache(db, user_id=payload.user_id)
+    await rebuild_user_profile_cache(db, user_id=user.id)
     return memory
 
 
 @router.patch("/{memory_id}", response_model=MemoryOut)
-async def update_memory(memory_id: UUID, payload: MemoryPatchRequest, db: AsyncSession = Depends(get_db)):
-    memory = await get_memory(db, memory_id)
+async def update_memory(memory_id: UUID, payload: MemoryPatchRequest, user: User = Depends(get_current_user),
+                        db: AsyncSession = Depends(get_db)):
+    memory = await owned_memory(db, memory_id, user)
     updates = payload.model_dump(exclude_unset=True)
 
     # New text => new meaning => new embedding, otherwise search would still find
@@ -139,9 +143,10 @@ async def update_memory(memory_id: UUID, payload: MemoryPatchRequest, db: AsyncS
 async def remove_memory(
     memory_id: UUID,
     hard: bool = Query(default=False, description="false = deactivate (reversible), true = delete permanently"),
+    user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    memory = await get_memory(db, memory_id)
+    memory = await owned_memory(db, memory_id, user)
     user_id = memory.user_id
     if hard:
         await delete_memory(db, memory_id)
@@ -153,8 +158,7 @@ async def remove_memory(
     return Response(status_code=204)
 
 
-@router.get("/profile/{user_id}")
-async def get_user_profile(user_id: UUID, db: AsyncSession = Depends(get_db)):
+async def _profile_payload(db: AsyncSession, user_id: UUID) -> dict:
     snapshot = await get_user_profile_snapshot(db, user_id=user_id)
     if snapshot is None:
         snapshot = await rebuild_user_profile_cache(db, user_id=user_id)
@@ -168,19 +172,24 @@ async def get_user_profile(user_id: UUID, db: AsyncSession = Depends(get_db)):
     }
 
 
-@router.post("/profile/{user_id}/rebuild")
-async def rebuild_profile(user_id: UUID, db: AsyncSession = Depends(get_db)):
-    await rebuild_user_profile_cache(db, user_id=user_id)
-    return await get_user_profile(user_id, db)
+@router.get("/profile")
+async def get_user_profile(user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    return await _profile_payload(db, user.id)
 
 
-@router.delete("/profile/{user_id}/items")
+@router.post("/profile/rebuild")
+async def rebuild_profile(user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    await rebuild_user_profile_cache(db, user_id=user.id)
+    return await _profile_payload(db, user.id)
+
+
+@router.delete("/profile/items")
 async def delete_profile_item(
-    user_id: UUID,
     value: str = Query(min_length=1, description="Exact text of the profile item to remove"),
+    user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    removed = await remove_profile_items_by_value(db, user_id=user_id, value=value)
+    removed = await remove_profile_items_by_value(db, user_id=user.id, value=value)
     if not removed:
         raise HTTPException(status_code=404, detail="Profile item not found")
-    return await get_user_profile(user_id, db)
+    return await _profile_payload(db, user.id)

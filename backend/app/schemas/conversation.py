@@ -11,9 +11,18 @@ if TYPE_CHECKING:
     from app.schemas.message import MessageRead
 
 class ConversationCreate(BaseModel):
+    """Internal: user_id always comes from the authenticated user."""
     title: str
     user_id: UUID
     convo_metadata: Optional[dict] = None
+
+
+class ConversationCreateRequest(BaseModel):
+    title: str = Field(default="New conversation", max_length=200)
+
+
+class ConversationUpdateRequest(BaseModel):
+    title: str = Field(min_length=1, max_length=200)
 
 class ConversationRead(BaseModel):
     id: UUID

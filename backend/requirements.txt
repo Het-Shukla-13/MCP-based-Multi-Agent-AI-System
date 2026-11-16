@@ -15,6 +15,10 @@ psycopg2-binary==2.9.11       # sync driver (alembic, file ingestion)
 alembic==1.18.4
 pgvector==0.4.2
 
+# --- Auth ---
+argon2-cffi==25.1.0          # Argon2id password hashing
+PyJWT==2.15.1                 # signed access tokens
+
 # --- Config / logging ---
 pydantic==2.12.5
 pydantic-settings==2.13.1
