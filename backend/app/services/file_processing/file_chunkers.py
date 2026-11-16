@@ -55,11 +55,29 @@ def chunk_markdown_and_docx(text: str):
         ("##", "Header 2"),
         ("###", "Header 3"),
     ]
+    # strip_headers=False keeps "# Title" lines inside the chunk text. The default
+    # (True) moves them into metadata only, and we used to drop that metadata, so
+    # every heading in MD/DOCX files was lost and couldn't be searched.
     splitter = MarkdownHeaderTextSplitter(
-        headers_to_split_on=headers_to_split_on
+        headers_to_split_on=headers_to_split_on,
+        strip_headers=False,
     )
-    docs = splitter.split_text(text)
-    return [doc.page_content for doc in docs]
+    chunks = []
+    for doc in splitter.split_text(text):
+        content = doc.page_content.strip()
+        if not content:
+            continue
+        # Deepest header = the section this chunk belongs to (used by the retriever).
+        section_title = next(
+            (doc.metadata[level] for level in ("Header 3", "Header 2", "Header 1") if doc.metadata.get(level)),
+            None,
+        )
+        metadata = {"headers": dict(doc.metadata)}
+        if section_title:
+            metadata["section_title"] = section_title
+            metadata["section_id"] = " > ".join(doc.metadata.values())
+        chunks.append({"content": content, "metadata": metadata})
+    return chunks
 
 def chunk_txt(text: str):
     splitter = RecursiveCharacterTextSplitter(

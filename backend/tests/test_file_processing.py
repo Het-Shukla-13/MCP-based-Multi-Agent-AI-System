@@ -20,9 +20,10 @@ def test_process_docx_handles_heading_styles_and_normal_paragraphs():
 
         chunks = process_docx(file_path)
 
-        joined = "\n".join(chunks)
+        joined = "\n".join(chunk["content"] for chunk in chunks)
         assert "# Document Title" in joined
         assert "This is a paragraph." in joined
+        assert chunks[0]["metadata"]["section_title"] == "Document Title"
 
 
 class DummyMemoryItem:
@@ -39,6 +40,9 @@ class DummyCreatedMemory:
         self.content = content
         self.memory_type = memory_type
         self.memory_metadata = memory_metadata
+        self.importance_score = 0.5
+        self.source = "conversation"
+        self.is_active = True
 
 
 @pytest.mark.asyncio

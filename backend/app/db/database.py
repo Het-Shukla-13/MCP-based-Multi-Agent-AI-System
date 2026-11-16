@@ -4,7 +4,7 @@ from app.core.config import settings
 from sqlmodel import create_engine, Session
 from contextlib import contextmanager
 
-engine=create_async_engine(settings.DATABASE_URL_ASYNC, echo=True)
+engine=create_async_engine(settings.DATABASE_URL_ASYNC, echo=settings.DB_ECHO)
 
 AsyncSessionLocal=sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False)
 
@@ -12,7 +12,7 @@ async def get_db():
     async with AsyncSessionLocal() as session:
         yield session
 
-sync_engine = create_engine(settings.DATABASE_URL_SYNC, echo=True)
+sync_engine = create_engine(settings.DATABASE_URL_SYNC, echo=settings.DB_ECHO)
 def get_sync_session():
     with Session(sync_engine) as session:
         yield session

@@ -3,7 +3,7 @@ from pathlib import Path
 import os
 
 from dotenv import load_dotenv
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
@@ -15,6 +15,9 @@ class Settings(BaseSettings):
     DATABASE_URL_ASYNC: str
     DATABASE_URL_SYNC: str
     ENV:str="dev"
+    DB_ECHO: bool = False  # True prints every SQL statement (debugging only)
+    # Browser origins allowed to call the API (JSON list in .env).
+    CORS_ORIGINS: list[str] = ["http://localhost:5173"]
     # --- LLM models (free tiers only; verify availability before changing) ---
     # Non-agent LLM calls (routing, summarization, memory, metadata, file generation).
     # Names starting with "gemini" go to Google AI Studio; anything else goes to Groq.
@@ -42,8 +45,7 @@ class Settings(BaseSettings):
     CELERY_BROKER_URL: str | None = None
     CELERY_RESULT_BACKEND: str | None = None
 
-    class Config:
-        env_file = str(ENV_FILE)
+    model_config = SettingsConfigDict(env_file=str(ENV_FILE), extra="ignore")
 
 @lru_cache
 def get_settings():
