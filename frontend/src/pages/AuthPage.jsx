@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { errorMessage, login, register } from "../lib/api";
-import { setToken } from "../lib/auth";
+import { setSession } from "../lib/auth";
 
 export default function AuthPage() {
   const [mode, setMode] = useState("login");
@@ -19,8 +19,8 @@ export default function AuthPage() {
     }
     setBusy(true);
     try {
-      const { access_token } = isRegister ? await register(email, password) : await login(email, password);
-      setToken(access_token); // App re-renders into the chat
+      const session = isRegister ? await register(email, password) : await login(email, password);
+      setSession(session); // App re-renders into the chat
     } catch (err) {
       setError(errorMessage(err, isRegister ? "Could not create the account." : "Could not sign in."));
     } finally {

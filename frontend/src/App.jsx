@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import AuthPage from "./pages/AuthPage.jsx";
 import ChatPage from "./pages/ChatPage.jsx";
-import { fetchMe } from "./lib/api";
+import { fetchMe, logout } from "./lib/api";
 import { clearToken, getToken, onTokenChange } from "./lib/auth";
 
 export default function App() {
@@ -25,5 +25,5 @@ export default function App() {
   if (!token) return <AuthPage />;
   if (!user) return <div className="auth-shell"><p className="sidebar__hint">Loading your account...</p></div>;
   // key: a different account gets a completely fresh chat state.
-  return <ChatPage key={user.id} user={user} onLogout={() => { clearToken(); setUser(null); }} />;
+  return <ChatPage key={user.id} user={user} onLogout={() => { void logout(); setUser(null); }} />;
 }
