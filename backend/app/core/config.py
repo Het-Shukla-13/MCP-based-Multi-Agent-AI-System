@@ -21,6 +21,8 @@ class Settings(BaseSettings):
     JWT_SECRET: str
     JWT_ALGORITHM: str = "HS256"
     ACCESS_TOKEN_MINUTES: int = 60
+    # Refresh tokens: long-lived, rotated on every use, revocable (stored hashed).
+    REFRESH_TOKEN_DAYS: int = 7
     # Browser origins allowed to call the API (JSON list in .env).
     CORS_ORIGINS: list[str] = ["http://localhost:5173"]
     # --- LLM models (free tiers only; verify availability before changing) ---
