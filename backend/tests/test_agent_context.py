@@ -42,3 +42,26 @@ def test_request_agent_is_fresh_and_does_not_touch_shared_state():
 
     assert isinstance(a, LlmAgent) and a is not b
     assert "secret A" in a.instruction(None) and "secret B" in b.instruction(None)
+
+
+def test_tool_identity_args_are_overwritten_with_request_identity():
+    # Security: whatever ids the model passes, tools get the real request identity.
+    agent = GeneralAgent()
+    request_agent = agent._build_request_agent(
+        AgentContext(user_id="real-user", conversation_id="real-conv", user_message="x"),
+        "gemini-3.1-flash-lite",
+    )
+    forged = {"user_id": "attacker", "conversation_id": "other-conv", "query": "secrets"}
+    tool = type("T", (), {"name": "search_files"})()
+
+    result = request_agent.before_tool_callback(tool, forged, None)
+
+    assert result is None  # proceed with the call
+    assert forged == {"user_id": "real-user", "conversation_id": "real-conv", "query": "secrets"}
+
+
+def test_agents_get_least_privilege_tool_views():
+    from app.agent_layer.tools.mcp_registry import AGENT_TOOLS
+
+    assert "read_file" not in AGENT_TOOLS["general"]["files"]
+    assert "read_file" in AGENT_TOOLS["document"]["files"]

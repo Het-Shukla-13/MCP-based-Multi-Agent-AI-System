@@ -20,8 +20,6 @@ An explicit @mention skips the root entirely (one model call instead of two).
 """
 
 import logging
-from collections.abc import Awaitable, Callable
-
 from google.adk.agents.llm_agent import LlmAgent
 from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
@@ -34,7 +32,7 @@ from app.agent_layer.agents.general_agent import GeneralAgent
 from app.agent_layer.agents.image_agent import ImageAgent
 from app.agent_layer.agents.research_agent import ResearchAgent
 from app.agent_layer.core import agent_registry
-from app.agent_layer.core.base import APP_NAME, BaseAgent
+from app.agent_layer.core.base import APP_NAME, BaseAgent, StatusCallback, emit_status, emit_tool_events
 from app.agent_layer.schemas import AgentContext, AgentResponse
 from app.core.config import settings
 
@@ -44,8 +42,6 @@ ROOT_NAME = "root"
 DEFAULT_AGENT = "general"
 ROUTER_HISTORY_MESSAGES = 4
 
-# Async callback the caller can pass to receive live status events (WebSocket).
-StatusCallback = Callable[[dict], Awaitable[None]]
 
 for _agent_cls in (GeneralAgent, CodeAgent, DataAgent, ResearchAgent, DocumentAgent, ImageAgent):
     if not agent_registry.exists(_agent_cls.name):
@@ -98,11 +94,7 @@ class RootAgent:
         on_status: StatusCallback | None = None,
     ) -> AgentResponse:
         async def emit(event: dict) -> None:
-            if on_status is not None:
-                try:
-                    await on_status(event)
-                except Exception:  # a closed socket must never break the turn
-                    logger.warning("Status callback failed", exc_info=True)
+            await emit_status(on_status, event)
 
         # 1) Explicit selection (@mention or UI pick): run that agent directly.
         if context.selected_agent and context.selected_agent in self.valid_agents:
@@ -110,7 +102,7 @@ class RootAgent:
             logger.info("Agent selection | mode=explicit | agent=%s", agent.name)
             await emit({"status": "working", "agent": agent.name, "mode": "explicit"})
             try:
-                return await agent.run(context)
+                return await agent.run(context, on_status=on_status)
             except Exception as exc:
                 raise AgentExecutionError(agent.name, exc) from exc
 
@@ -126,7 +118,7 @@ class RootAgent:
         last_exc: Exception | None = None
         for router_model, agent_model in attempts:
             try:
-                return await self._delegate(context, router_model, agent_model, emit)
+                return await self._delegate(context, router_model, agent_model, emit, on_status)
             except Exception as exc:
                 last_exc = exc
                 if not _is_quota_error(exc):
@@ -134,7 +126,7 @@ class RootAgent:
                 logger.warning("Delegation quota error on %s/%s; trying fallback", router_model, agent_model)
         raise AgentExecutionError(ROOT_NAME, last_exc)
 
-    async def _delegate(self, context, router_model, agent_model, emit) -> AgentResponse:
+    async def _delegate(self, context, router_model, agent_model, emit, on_status) -> AgentResponse:
         agents = [agent_registry.get(name) for name in agent_registry.list_agents()]
         root = LlmAgent(
             name=ROOT_NAME,
@@ -157,6 +149,7 @@ class RootAgent:
             session_id=session.id,
             new_message=Content(role="user", parts=[Part.from_text(text=context.user_message)]),
         ):
+            await emit_tool_events(on_status, event)
             parts = (event.content.parts if event.content and event.content.parts else [])
             for part in parts:
                 call = getattr(part, "function_call", None)
@@ -174,7 +167,7 @@ class RootAgent:
             logger.warning("Root did not delegate (transfer=%s); falling back to %s", transferred_to, DEFAULT_AGENT)
             await emit({"status": "working", "agent": DEFAULT_AGENT, "mode": "fallback"})
             context.selected_agent = DEFAULT_AGENT
-            return await agent_registry.get(DEFAULT_AGENT).run(context)
+            return await agent_registry.get(DEFAULT_AGENT).run(context, on_status=on_status)
 
         logger.info("Agent selection | mode=adk_delegation | router=%s | agent=%s", router_model, answered_by)
         return AgentResponse(

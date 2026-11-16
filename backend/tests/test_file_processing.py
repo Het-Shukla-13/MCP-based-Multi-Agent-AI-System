@@ -105,3 +105,15 @@ async def test_promote_memories_from_messages_accepts_dict_and_model_items(monke
     assert len(created_memories) == 2
     assert created_memories[0]["content"] == "I love pizza."
     assert created_memories[1]["content"] == "I love pizza."
+
+
+def test_read_csv_robust_skips_leading_comment_lines(tmp_path):
+    from app.services.file_processing.tabular import read_csv_robust
+
+    path = tmp_path / "data.csv"
+    path.write_text("# exported by some tool\n# another note\nID,Name,Note\n1,a,has # inside\n2,b,x\n")
+    df = read_csv_robust(str(path))
+
+    assert list(df.columns) == ["ID", "Name", "Note"]
+    assert len(df) == 2
+    assert df.loc[0, "Note"] == "has # inside"  # '#' inside values is kept

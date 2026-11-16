@@ -12,9 +12,6 @@ class ResearchAgent(BaseAgent):
     description = (
         "Research and synthesis: looking up facts, current events, comparisons and structured reports on a topic."
     )
-    tools = [
-        "memory_search",
-    ]
     def _build_adk_agent(self) -> LlmAgent:
         return LlmAgent(
             name="research",
