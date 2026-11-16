@@ -3,6 +3,9 @@ from __future__ import annotations
 import csv
 import html
 import json
+import secrets
+
+import markdown
 from pathlib import Path
 from uuid import UUID
 
@@ -11,7 +14,7 @@ from fastapi.responses import FileResponse, HTMLResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.database import get_db
-from app.services.file_generation.file_renderer import get_mime_type
+from app.services.file_generation.file_renderer import format_from_path, get_mime_type
 from app.crud.file import get_file
 
 router = APIRouter(prefix="/files", tags=["File Generation"])
@@ -27,7 +30,7 @@ async def download_generated_file(
     if not path.exists():
         raise HTTPException(status_code=404, detail="Generated file is missing from storage.")
 
-    mime_type = file_record.file_type or get_mime_type(_infer_format_from_path(path))
+    mime_type = file_record.file_type or get_mime_type(format_from_path(path))
     return FileResponse(
         path,
         media_type=mime_type,
@@ -47,7 +50,7 @@ async def raw_generated_file(
     if not path.exists():
         raise HTTPException(status_code=404, detail="Generated file is missing from storage.")
 
-    mime_type = file_record.file_type or get_mime_type(_infer_format_from_path(path))
+    mime_type = file_record.file_type or get_mime_type(format_from_path(path))
     headers = {}
     if mime_type == "application/pdf":
         headers["Content-Disposition"] = f'inline; filename="{file_record.filename}"'
@@ -59,138 +62,84 @@ async def raw_generated_file(
     )
 
 
+PREVIEW_CSS = """
+body { font-family: system-ui, sans-serif; margin: 0; background: #f6f7f9; color: #1d2433; }
+.bar { display: flex; justify-content: space-between; align-items: center; gap: 1rem; flex-wrap: wrap;
+       padding: 0.9rem 1.25rem; background: #fff; border-bottom: 1px solid #e3e6eb; }
+.title { font-weight: 600; } .type { color: #667085; font-size: 0.85rem; }
+.actions { display: flex; gap: 0.75rem; } .actions a, .actions button { font-size: 0.9rem; }
+.content { max-width: 960px; margin: 1.25rem auto; background: #fff; border: 1px solid #e3e6eb;
+           border-radius: 8px; padding: 1.5rem; overflow-x: auto; }
+pre { white-space: pre-wrap; word-break: break-word; }
+table { border-collapse: collapse; } th, td { border: 1px solid #d0d5dd; padding: 4px 8px; }
+th { background: #f2f4f7; } img { max-width: 100%; } iframe { width: 100%; height: 80vh; border: 0; }
+"""
+
+
+def _preview_body(file_id: UUID, mime_type: str, raw: str | None) -> str:
+    raw_url = f"/files/generated/{file_id}/raw"
+    if mime_type == "application/pdf":
+        return f'<iframe src="{raw_url}" title="PDF preview"></iframe>'
+    if mime_type.startswith("image/"):
+        return f'<img src="{raw_url}" alt="Generated image">'
+    if mime_type == "text/csv" and raw is not None:
+        rows = list(csv.reader(raw.splitlines()))[:500]
+        if rows:
+            head = "".join(f"<th>{html.escape(c)}</th>" for c in rows[0])
+            body = "".join("<tr>" + "".join(f"<td>{html.escape(c)}</td>" for c in r) + "</tr>" for r in rows[1:])
+            return f"<table><thead><tr>{head}</tr></thead><tbody>{body}</tbody></table>"
+    if mime_type == "application/json" and raw is not None:
+        try:
+            raw = json.dumps(json.loads(raw), indent=2, ensure_ascii=False)
+        except json.JSONDecodeError:
+            pass
+    if mime_type == "text/markdown" and raw is not None:
+        # Model-written Markdown may contain raw HTML; the CSP below stops any script.
+        return markdown.markdown(raw, extensions=["tables", "fenced_code", "sane_lists"])
+    return f'<pre id="preview-text">{html.escape(raw or "")}</pre>'
+
+
 @router.get("/generated/{file_id}/preview", response_class=HTMLResponse)
-async def preview_generated_file(
-    file_id: UUID,
-    db: AsyncSession = Depends(get_db),
-):
+async def preview_generated_file(file_id: UUID, db: AsyncSession = Depends(get_db)):
+    """
+    Browser preview of a generated file.
+
+    Security: the page renders user/model-provided content, so
+    - every string is HTML-escaped (filenames included: uploads choose their own names), and
+    - a Content-Security-Policy allows ONLY our own copy-button script (per-request nonce);
+      a <script> or onerror= inside rendered Markdown is blocked by the browser (stored XSS).
+    """
     file_record = await get_file(db, file_id)
     path = Path(file_record.storage_path)
     if not path.exists():
         raise HTTPException(status_code=404, detail="Generated file is missing from storage.")
 
-    mime_type = file_record.file_type.split(";")[0].strip().lower()
-    raw_content = None
-    if mime_type == "application/pdf":
-        preview_body = f"""
-            <iframe
-              src=\"/files/generated/{file_id}/raw\"
-              width=\"100%\"
-              height=\"100%\"
-              style=\"border:none; background: #0f172a;\"
-            ></iframe>
-        """
-    else:
-        raw_content = path.read_text(encoding="utf-8", errors="replace")
-        if mime_type == "text/csv":
-            rows = []
-            try:
-                for row in csv.reader(raw_content.splitlines()):
-                    rows.append([html.escape(cell) for cell in row])
-            except Exception:
-                rows = []
-
-            if rows:
-                table_rows = [
-                    "<table style=\"width:100%; border-collapse: collapse;\">",
-                    "<thead><tr>"
-                    + "".join(
-                        f'<th style=\"border:1px solid #334155; padding:0.5rem; text-align:left;\">{cell}</th>'
-                        for cell in rows[0]
-                    )
-                    + "</tr></thead>",
-                    "<tbody>",
-                ]
-                for row in rows[1:]:
-                    table_rows.append(
-                        "<tr>"
-                        + "".join(
-                            f'<td style=\"border:1px solid #334155; padding:0.5rem;\">{cell}</td>'
-                            for cell in row
-                        )
-                        + "</tr>"
-                    )
-                table_rows.append("</tbody>")
-                table_rows.append("</table>")
-                preview_body = "\n".join(table_rows)
-            else:
-                preview_body = f"""
-                    <pre id=\"preview-text\" style=\"white-space: pre-wrap; word-break: break-word; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;\">{html.escape(raw_content)}</pre>
-                """
-        elif mime_type == "application/json":
-            try:
-                parsed_json = json.loads(raw_content)
-                pretty = json.dumps(parsed_json, indent=2, ensure_ascii=False)
-            except Exception:
-                pretty = raw_content
-            preview_body = f"""
-                <pre id=\"preview-text\" style=\"white-space: pre-wrap; word-break: break-word; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;\">{html.escape(pretty)}</pre>
-            """
-        else:
-            preview_body = f"""
-                <pre id=\"preview-text\" style=\"white-space: pre-wrap; word-break: break-word; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;\">{html.escape(raw_content)}</pre>
-            """
-
-    page_html = f"""
-        <!DOCTYPE html>
-        <html lang=\"en\">
-        <head>
-          <meta charset=\"utf-8\" />
-          <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\" />
-          <title>Preview - {file_record.filename}</title>
-          <style>
-            body {{ margin: 0; font-family: system-ui, sans-serif; background: #0f172a; color: #e2e8f0; }}
-            .toolbar {{ display: flex; justify-content: space-between; align-items: center; gap: 1rem; padding: 1rem; background: #111827; flex-wrap: wrap; }}
-            .toolbar button, .toolbar a {{ color: #fff; background: #1d4ed8; border: none; border-radius: 0.5rem; padding: 0.6rem 1rem; cursor: pointer; text-decoration: none; }}
-            .toolbar button:hover, .toolbar a:hover {{ background: #2563eb; }}
-            .preview-container {{ padding: 1rem; height: calc(100vh - 88px); overflow: auto; }}
-            .preview-title {{ margin: 0 0 0.5rem; font-size: 1.1rem; }}
-            table {{ width: 100%; border-collapse: collapse; }}
-            th, td {{ border: 1px solid #334155; padding: 0.75rem; text-align: left; }}
-            th {{ background: #1e293b; }}
-            pre {{ margin: 0; white-space: pre-wrap; word-break: break-word; }}
-          </style>
-        </head>
-        <body>
-          <div class=\"toolbar\">
-            <div>
-              <div class=\"preview-title\">Preview: {file_record.filename}</div>
-              <div>{file_record.file_type}</div>
-            </div>
-            <div style=\"display:flex; gap: 0.75rem; flex-wrap: wrap;\">
-              <a href=\"/files/generated/{file_id}/download\" target=\"_blank\" rel=\"noreferrer\">Download</a>
-              <a id=\"raw-link\" href=\"/files/generated/{file_id}/raw\" target=\"_blank\" rel=\"noreferrer\">Open raw</a>
-              <button type=\"button\" onclick=\"copyPreviewText()\">Copy</button>
-            </div>
-          </div>
-          <div class=\"preview-container\">
-            {preview_body}
-          </div>
-          <script>
-            function copyPreviewText() {{
-              const previewText = document.getElementById('preview-text');
-              const rawLink = document.getElementById('raw-link');
-              const text = previewText ? previewText.innerText : rawLink ? rawLink.href : '';
-              navigator.clipboard.writeText(text).then(function() {{
-                alert('Copied to clipboard');
-              }}).catch(function() {{
-                alert('Copy failed.');
-              }});
-            }}
-          </script>
-        </body>
-        </html>
-    """
-
-    return HTMLResponse(content=page_html, status_code=200)
-
-
-def _infer_format_from_path(path: Path):
-    suffix = path.suffix.lower()
-    return {
-        ".txt": "txt",
-        ".md": "md",
-        ".json": "json",
-        ".csv": "csv",
-        ".pdf": "pdf",
-    }.get(suffix, "txt")
+    mime_type = (file_record.file_type or "").split(";")[0].strip().lower()
+    raw = path.read_text(encoding="utf-8", errors="replace") if mime_type.startswith(("text/", "application/json")) else None
+    nonce = secrets.token_urlsafe(16)
+    name = html.escape(file_record.filename)
+    page = f"""<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Preview: {name}</title><style>{PREVIEW_CSS}</style></head>
+<body>
+  <div class="bar">
+    <div><div class="title">{name}</div><div class="type">{html.escape(mime_type)}</div></div>
+    <div class="actions">
+      <a href="/files/generated/{file_id}/download">Download</a>
+      <a href="/files/generated/{file_id}/raw" target="_blank" rel="noreferrer">Open raw</a>
+      <button type="button" id="copy-btn">Copy text</button>
+    </div>
+  </div>
+  <div class="content" id="preview-root">{_preview_body(file_id, mime_type, raw)}</div>
+  <script nonce="{nonce}">
+    document.getElementById('copy-btn').addEventListener('click', function () {{
+      navigator.clipboard.writeText(document.getElementById('preview-root').innerText);
+    }});
+  </script>
+</body></html>"""
+    csp = (
+        "default-src 'none'; "
+        f"script-src 'nonce-{nonce}'; "
+        "style-src 'unsafe-inline'; img-src 'self' data:; frame-src 'self'; base-uri 'none'; form-action 'none'"
+    )
+    return HTMLResponse(content=page, headers={"Content-Security-Policy": csp, "X-Content-Type-Options": "nosniff"})

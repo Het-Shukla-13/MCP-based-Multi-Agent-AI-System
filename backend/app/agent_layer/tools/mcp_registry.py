@@ -33,7 +33,7 @@ MCP_SERVERS: dict[str, str] = {
 }
 
 _DATA_TOOLS = ["table_info", "aggregate", "filter_rows", "top_n", "value_counts", "correlation"]
-_ARTIFACTS = {"artifacts": ["create_file"]}
+_ARTIFACTS = {"artifacts": ["create_file", "list_templates", "create_from_template"]}
 
 # agent name -> {server name: [allowed tool names]}
 AGENT_TOOLS: dict[str, dict[str, list[str]]] = {
