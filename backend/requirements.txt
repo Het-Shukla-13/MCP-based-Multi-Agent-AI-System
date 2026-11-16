@@ -48,3 +48,10 @@ tree-sitter-language-pack==1.25.2
 # --- Embeddings (local MiniLM; replaced by Gemini embeddings in feature/gemini-embeddings) ---
 langchain-huggingface==1.2.1
 sentence-transformers==5.3.0
+
+# --- MCP tool servers ---
+httpx==0.28.1                 # web fetch, image generation download
+ddgs==9.16.1                   # free web search (metasearch, no API key)
+beautifulsoup4==4.15.0         # web page text extraction
+markdown==3.11.3               # Markdown -> HTML -> PDF (artifacts)
+tabulate==0.10.0               # DataFrame.to_markdown (data tools)

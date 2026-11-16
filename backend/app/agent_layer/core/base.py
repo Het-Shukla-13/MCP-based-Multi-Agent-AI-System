@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
 import logging
+import re
 from time import perf_counter
 
 from google.adk.agents.llm_agent import LlmAgent
@@ -20,6 +21,16 @@ APP_NAME = "agent_system"
 
 StatusCallback = Callable[[dict], Awaitable[None]]
 
+_RETRYABLE_MARKERS = ("429", "resource_exhausted", "quota", "500", "503", "unavailable",
+                      "overloaded", "high demand", "internal error", "deadline")
+
+
+def is_retryable_provider_error(exc: Exception) -> bool:
+    """Rate limits AND temporary provider outages (e.g. Gemini 503 'high demand')
+    deserve a retry on the fallback model; bugs in our own request do not."""
+    text = str(exc).lower()
+    return any(marker in text for marker in _RETRYABLE_MARKERS)
+
 
 async def emit_status(on_status: StatusCallback | None, event: dict) -> None:
     if on_status is None:
@@ -28,6 +39,20 @@ async def emit_status(on_status: StatusCallback | None, event: dict) -> None:
         await on_status(event)
     except Exception:  # a closed socket must never break the turn
         logger.warning("Status callback failed", exc_info=True)
+
+
+_GENERATED_ID = re.compile(r"generated_file_id['\"]?\s*[:=]\s*['\"]?([0-9a-f-]{36})")
+
+
+def collect_generated_files(event: Any, found: list[str]) -> None:
+    """Tool results that created files carry 'generated_file_id: <uuid>'; remember them."""
+    content = getattr(event, "content", None)
+    for part in getattr(content, "parts", None) or []:
+        response = getattr(part, "function_response", None)
+        if response is not None:
+            for file_id in _GENERATED_ID.findall(str(response.response)):
+                if file_id not in found:
+                    found.append(file_id)
 
 
 async def emit_tool_events(on_status: StatusCallback | None, event: Any) -> None:
@@ -104,9 +129,7 @@ class BaseAgent(ABC):
 
     @staticmethod
     def _is_quota_error(exc: Exception) -> bool:
-        """True for 429 / RESOURCE_EXHAUSTED / quota errors."""
-        exc_str = str(exc).lower()
-        return "429" in exc_str or "resource_exhausted" in exc_str or "quota" in exc_str
+        return is_retryable_provider_error(exc)
 
     def _build_request_agent(self, context: AgentContext, model: str) -> LlmAgent:
         """Fresh LlmAgent for one request: base agent + compiled instruction + model."""
@@ -152,6 +175,7 @@ class BaseAgent(ABC):
         prompt: str,
         model: str,
         on_status: StatusCallback | None = None,
+        generated_files: list[str] | None = None,
     ) -> str:
         """Run one ADK turn on `model` without blocking the event loop."""
         started_at = perf_counter()
@@ -178,6 +202,8 @@ class BaseAgent(ABC):
             new_message=Content(role="user", parts=[Part.from_text(text=prompt)]),
         ):
             await emit_tool_events(on_status, event)
+            if generated_files is not None:
+                collect_generated_files(event, generated_files)
             # Read text Parts directly; str(event.content) would leak the object repr.
             content = getattr(event, "content", None)
             for part in getattr(content, "parts", None) or []:
@@ -202,22 +228,25 @@ class BaseAgent(ABC):
         )
 
         try:
-            final_text = await self._run_with_model(context, prompt, primary_model, on_status)
+            generated: list[str] = []
+            final_text = await self._run_with_model(context, prompt, primary_model, on_status, generated)
         except Exception as primary_exc:
             fallback_model = settings.AGENT_FALLBACK_MODEL
-            if not (self._is_quota_error(primary_exc) and fallback_model):
+            if not (is_retryable_provider_error(primary_exc) and fallback_model):
                 raise
             logger.warning(
-                "Agent '%s' hit quota on '%s'. Falling back to '%s'. error=%s",
+                "Agent '%s' failed on '%s' (retryable). Falling back to '%s'. error=%s",
                 self.name, primary_model, fallback_model, primary_exc,
             )
             # Fallback uses its own fresh agent object; nothing shared is mutated.
-            final_text = await self._run_with_model(context, prompt, fallback_model, on_status)
+            generated = []
+            final_text = await self._run_with_model(context, prompt, fallback_model, on_status, generated)
 
         return AgentResponse(
             content=final_text.strip(),
             agent_name=self.name,
             selected_agent=context.selected_agent,
+            generated_file_ids=generated,
         )
 
     async def prepare_context(self, context: AgentContext) -> AgentContext:

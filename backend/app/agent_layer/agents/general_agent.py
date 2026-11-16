@@ -27,6 +27,12 @@ You handle:
 - fallback queries
 
 You MUST use provided context if present.
+
+TOOLS:
+- list_files / search_files: when the user refers to something they uploaded.
+- When the user asks for a downloadable file (report, notes, CSV, JSON, PDF...), write the
+  complete content yourself, call create_file, then share the returned download_url as a
+  Markdown link [filename](download_url).
 """,
         )
 

@@ -25,16 +25,24 @@ BACKEND_ROOT = Path(__file__).resolve().parents[3]
 # server name -> python module that runs it
 MCP_SERVERS: dict[str, str] = {
     "files": "app.mcp_servers.files_server",
+    "data": "app.mcp_servers.data_server",
+    "web": "app.mcp_servers.web_server",
+    "code": "app.mcp_servers.code_server",
+    "image": "app.mcp_servers.image_server",
+    "artifacts": "app.mcp_servers.artifacts_server",
 }
+
+_DATA_TOOLS = ["table_info", "aggregate", "filter_rows", "top_n", "value_counts", "correlation"]
+_ARTIFACTS = {"artifacts": ["create_file"]}
 
 # agent name -> {server name: [allowed tool names]}
 AGENT_TOOLS: dict[str, dict[str, list[str]]] = {
-    "general": {"files": ["list_files", "search_files"]},
-    "code": {"files": ["list_files", "search_files", "read_file"]},
-    "data": {"files": ["list_files", "search_files", "read_file"]},
-    "research": {"files": ["list_files", "search_files"]},
-    "document": {"files": ["list_files", "search_files", "read_file"]},
-    "image": {"files": ["list_files", "read_file"]},
+    "general": {"files": ["list_files", "search_files"], **_ARTIFACTS},
+    "code": {"files": ["list_files", "search_files", "read_file"], "code": ["analyze_code"], **_ARTIFACTS},
+    "data": {"files": ["list_files", "read_file"], "data": _DATA_TOOLS, **_ARTIFACTS},
+    "research": {"web": ["web_search", "fetch_page"], "files": ["list_files", "search_files"], **_ARTIFACTS},
+    "document": {"files": ["list_files", "search_files", "read_file"], **_ARTIFACTS},
+    "image": {"files": ["list_files"], "image": ["describe_image", "generate_image"]},
 }
 
 # Arguments that identify WHOSE data a tool touches. Never trusted from the model.

@@ -19,11 +19,6 @@ from app.services.memory.background_memory_pipeline import (
 from app.services.user_profile.user_profile_cache_service import (
     update_profile_snapshot_from_user_message,
 )
-from app.services.file_generation.intent_router import (
-    classify_generation_intent_with_llm,
-    detect_generation_intent,
-)
-from app.services.file_generation.file_generation_service import generate_file_artifact
 from app.agent_layer.agents.root_agent import AgentExecutionError, RootAgent, StatusCallback
 from app.agent_layer.core.mentions import parse_agent_mention
 from app.agent_layer.schemas import AgentContext, HistoryMessage
@@ -151,9 +146,11 @@ def build_ai_message_payload(
     user_message: Message,
     ai_content: str,
     agent_name: str | None = None,
+    file_ids: list | None = None,
 ) -> MessageCreate:
-    # Uploaded files belong to the USER message. Passing them here made
-    # _attach_files_to_message re-point file.message_id to the AI reply.
+    # Uploaded files belong to the USER message (passing them here used to re-point
+    # file.message_id to the AI reply). file_ids here are only files the agent's
+    # tools CREATED during this turn (e.g. create_file, generate_image).
     return MessageCreate(
         user_id=user_message.user_id,
         conversation_id=user_message.conversation_id,
@@ -161,7 +158,7 @@ def build_ai_message_payload(
         role="assistant",
         token_count=None,
         agent_name=agent_name,
-        file_ids=[],
+        file_ids=file_ids or [],
     )
 
 
@@ -201,6 +198,7 @@ async def send_message(
     rag_context: str = "",
     selected_agent: str | None = None,
     on_status: StatusCallback | None = None,
+    requested_format: str | None = None,
 ) -> dict[str, Message]:
     turn_started_at = perf_counter()
     payload.token_count = get_message_token_count(payload)
@@ -269,6 +267,8 @@ async def send_message(
     # The stored user message keeps the mention; the agent gets the text without it.
     mentioned_agent, agent_input = parse_agent_mention(payload.content, root_agent.valid_agents)
     explicit_agent = selected_agent if selected_agent in root_agent.valid_agents else mentioned_agent
+    if requested_format:  # UI format picker: ask the agent to deliver a file
+        agent_input += f"\n\n(Deliver the result as a .{requested_format} file using the create_file tool.)"
 
     logger.info(
         "Agent routing | explicit_agent={} | previous_active_agent={} | mode={}",
@@ -303,10 +303,12 @@ async def send_message(
 
     ai_response_started_at = perf_counter()
     agent_error = False
+    generated_file_ids: list = []
     try:
         agent_response = await root_agent.run(agent_context, on_status=on_status)
         answered_by = agent_response.agent_name
         ai_content = agent_response.content
+        generated_file_ids = agent_response.generated_file_ids
         updated_metadata = set_active_agent(conversation.convo_metadata, answered_by)
         await update_conversation_metadata(db, payload.conversation_id, updated_metadata)
     except AgentExecutionError as exc:
@@ -324,7 +326,9 @@ async def send_message(
     if not ai_content:
         ai_content = EMPTY_RESPONSE_FALLBACK
 
-    ai_message = build_ai_message_payload(user_message, ai_content, agent_name=answered_by)
+    ai_message = build_ai_message_payload(
+        user_message, ai_content, agent_name=answered_by, file_ids=generated_file_ids
+    )
     ai_message.token_count = get_message_token_count(ai_message)
     create_ai_started_at = perf_counter()
     ai_message = await create_message(db, ai_message)
@@ -366,42 +370,13 @@ async def send_message_from_payload(
     authenticated_user_id,
     on_status: StatusCallback | None = None,
 )-> dict[str, Message]:
+    # File generation is now an agent TOOL (artifacts MCP server). The old
+    # pre-flight path ran a keyword check plus often an extra LLM call on every
+    # message and bypassed the agents entirely.
     request_started_at = perf_counter()
-    generation_decision = detect_generation_intent(
-        text=payload["content"],
-        explicit_format=payload.get("format"),
-        explicit_action=payload.get("action"),
-    )
-
-    if not generation_decision.should_generate:
-        generation_decision = await classify_generation_intent_with_llm(
-            text=payload["content"],
-            current_decision=generation_decision,
-        )
-        logger.info("Using LLM for intent detection | should_generate={} | reason={}", generation_decision.should_generate, generation_decision.reason)
-
-    if generation_decision.should_generate:
-        generated = await generate_file_artifact(
-            db,
-            user_id=authenticated_user_id,
-            conversation_id=conversation_id,
-            prompt=payload["content"],
-            output_format=payload.get("format") or generation_decision.format,
-            file_ids=payload.get("file_ids", []),
-            decision=generation_decision,
-            explicit_action=payload.get("action"),
-            persist_messages=True,
-        )
-        logger.info(
-            "Chat timing | stage=generate_file_artifact | duration_min={}",
-            elapsed_minutes(request_started_at),
-        )
-        return {
-            "user_message": generated.user_message,
-            "ai_message": generated.assistant_message,
-            "active_agent": "system",
-            "agent_switched": False,
-        }
+    requested_format = payload.get("format")
+    if requested_format not in (None, "txt", "md", "json", "csv", "pdf"):
+        requested_format = None
 
     message_payload = MessageCreate(
         user_id=authenticated_user_id,
@@ -435,6 +410,7 @@ async def send_message_from_payload(
         rag_context=rag_context,
         selected_agent=payload.get("selected_agent"),
         on_status=on_status,
+        requested_format=requested_format,
     )
     logger.info(
         "Chat timing | stage=send_message_from_payload_total | duration_min={}",

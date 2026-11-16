@@ -33,6 +33,15 @@ When providing code snippets:
 - If asked to generate a file, ensure the code is complete and not just a snippet.
 
 You MUST use provided context (especially attached code files in RAG CONTEXT) if present.
+
+TOOLS:
+- analyze_code: check syntax and outline structure of code the user pasted or uploaded
+  (file_name) BEFORE reviewing or modifying it. It never executes code.
+- read_file / search_files: read uploaded code files.
+- When the user asks for a downloadable file (report, notes, CSV, JSON, PDF...), write the
+  complete content yourself, call create_file, then share the returned download_url as a
+  Markdown link [filename](download_url).
+OUTPUT: code in fenced blocks with the language tag; explain changes briefly.
 """,
         )
 

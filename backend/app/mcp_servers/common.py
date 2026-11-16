@@ -49,3 +49,59 @@ def match_file(files: list[File], file_name: str) -> File | None:
         if wanted and wanted in f.filename.casefold():
             return f
     return None
+
+
+async def resolve_owned_file(user_id: str, conversation_id: str, file_name: str) -> tuple[File | None, str]:
+    """Return (file, error_message). Ownership is enforced by user + conversation."""
+    from app.db.database import AsyncSessionLocal
+
+    uid, cid = parse_uuid(user_id, "user_id"), parse_uuid(conversation_id, "conversation_id")
+    async with AsyncSessionLocal() as db:
+        files = await get_owned_files(db, uid, cid)
+    target = match_file(files, file_name)
+    if target is None:
+        names = ", ".join(f.filename for f in files) or "none"
+        return None, f"No uploaded file matches '{file_name}'. Available files: {names}"
+    return target, ""
+
+
+GENERATED_FILE_MARKER = "generated_file_id"
+
+
+async def save_generated_file(user_id: str, conversation_id: str, filename: str, data: bytes, mime_type: str) -> dict:
+    """
+    Store bytes produced by a tool and register them as a conversation file.
+    Returns ids/URLs; the agent layer finds GENERATED_FILE_MARKER in the tool
+    result and attaches the file to the assistant's reply.
+    """
+    from app.core.config import BACKEND_ROOT
+    from app.crud.file import create_file
+    from app.db.database import AsyncSessionLocal
+    from app.schemas.file import FileCreate
+
+    out_dir = BACKEND_ROOT / "generated"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    path = out_dir / filename
+    path.write_bytes(data)
+
+    async with AsyncSessionLocal() as db:
+        record = await create_file(
+            db,
+            FileCreate(
+                conversation_id=parse_uuid(conversation_id, "conversation_id"),
+                user_id=parse_uuid(user_id, "user_id"),
+                filename=filename,
+                file_type=mime_type,
+                file_size=len(data),
+                storage_path=str(path),
+                status="processed",
+            ),
+        )
+        await db.commit()
+    file_id = str(record.id)
+    return {
+        GENERATED_FILE_MARKER: file_id,
+        "filename": filename,
+        "download_url": f"/files/generated/{file_id}/download",
+        "preview_url": f"/files/generated/{file_id}/preview",
+    }
