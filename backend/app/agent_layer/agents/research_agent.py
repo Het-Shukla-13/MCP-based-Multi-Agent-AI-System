@@ -7,7 +7,9 @@ from app.agent_layer.schemas import AgentContext
 class ResearchAgent(BaseAgent):
 
     name = "research"
-
+    tools = [
+        "memory_search",
+    ]
     def _build_adk_agent(self) -> LlmAgent:
         return LlmAgent(
             name="research",

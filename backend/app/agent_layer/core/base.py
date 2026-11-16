@@ -8,6 +8,7 @@ from google.adk.sessions import InMemorySessionService
 from app.agent_layer.schemas import AgentContext, AgentResponse
 
 from google.genai.types import Content, Part
+from app.agent_layer.tools.registry import tool_registry
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +21,7 @@ class BaseAgent(ABC):
 
     name: str
     description: str = ""
+    tools: list[str] = []
 
     def __init__(self):
         # ADK session system (can later be replaced with DB-backed session service)
@@ -146,7 +148,13 @@ CONVERSATION METADATA:
     async def run(self, context: AgentContext) -> AgentResponse:
         from app.core.config import settings
 
-        prompt = self.build_prompt(context)
+        context = await self.prepare_context(
+            context
+        )
+
+        prompt = self.build_prompt(
+            context
+        )
 
         # Dynamically inject context into the System Instruction for this turn.
         # Use an instruction provider so ADK does not attempt default session
@@ -190,3 +198,20 @@ CONVERSATION METADATA:
             agent_name=self.name,
             selected_agent=context.selected_agent,
         )
+    
+    async def execute_tool(
+        self,
+        tool_name: str,
+        **kwargs,
+    ):
+        tool = tool_registry.get(tool_name)
+
+        return await tool.execute(
+            **kwargs
+        )
+    
+    async def prepare_context(
+        self,
+        context: AgentContext,
+    ) -> AgentContext:
+        return context
