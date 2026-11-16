@@ -33,4 +33,4 @@ class MessageRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 from app.schemas.file import FileRead
-MessageRead.update_forward_refs()
+MessageRead.model_rebuild()

@@ -6,6 +6,8 @@ from pgvector.sqlalchemy import Vector
 from sqlalchemy import Column, DateTime, Float, Index, JSON, String, Text
 from sqlmodel import Field, SQLModel
 
+from app.core.config import settings
+
 
 class Memory(SQLModel, table=True):
     __tablename__ = "memory"
@@ -58,5 +60,5 @@ class Memory(SQLModel, table=True):
 
     embedding: Optional[list[float]] = Field(
         default=None,
-        sa_column=Column(Vector(384), nullable=True),
+        sa_column=Column(Vector(settings.EMBEDDING_DIM), nullable=True),
     )

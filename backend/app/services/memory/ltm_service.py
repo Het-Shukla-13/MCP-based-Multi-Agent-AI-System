@@ -13,16 +13,20 @@ from app.services.embeddings.embedding_utils import embed_text_async
 from app.services.memory.memory_comparator import compare_memories
 
 
-DEFAULT_DEDUP_DISTANCE_THRESHOLD = 0.18
-FACT_CONFLICT_COMPARISON_MAX_DISTANCE = 1.10
+DEFAULT_DEDUP_DISTANCE_THRESHOLD = 0.32
+FACT_CONFLICT_COMPARISON_MAX_DISTANCE = 0.55
 FACT_CONFLICT_MIN_TOKEN_OVERLAP = 1
 
+# Calibrated for gemini-embedding-001 (768-d, L2-normalised), measured on
+# document-document pairs: paraphrases 0.26-0.29, contradictions 0.37-0.41,
+# unrelated ~0.64. Below the gate an LLM comparator still confirms duplicates.
+# (The previous values were tuned for MiniLM and would miss every paraphrase.)
 DEDUP_DISTANCE_BY_TYPE = {
-    "preference": 0.14,
-    "decision": 0.16,
-    "fact": 0.18,
-    "task": 0.16,
-    "conversation_summary": 0.20,
+    "preference": 0.32,
+    "decision": 0.32,
+    "fact": 0.32,
+    "task": 0.30,
+    "conversation_summary": 0.35,
 }
 
 MEMORY_TYPE_PRIORITY = {
@@ -35,6 +39,7 @@ MEMORY_TYPE_PRIORITY = {
 
 
 MIN_DUPLICATE_COMPARISON_CONFIDENCE = 0.70
+MIN_REFINEMENT_CONFIDENCE = 0.85
 MIN_CONFLICT_COMPARISON_CONFIDENCE = 0.70
 RECENT_CONFLICT_CHECK_LIMIT = 8
 
@@ -197,6 +202,17 @@ async def _check_duplicate_candidates(
         confidence = float(comparison.get("confidence", 0.5) or 0.5)
 
         if relationship == "duplicate" and confidence >= MIN_DUPLICATE_COMPARISON_CONFIDENCE:
+            return existing_memory, comparison, distance
+
+        # Refinement: inside the tight dedup gate, "compatible" + more detail means the
+        # new memory REFINES the old one ("prefers Python" -> "prefers Python and it is
+        # their favourite language"). Update in place instead of storing a near-copy.
+        if (
+            relationship == "compatible"
+            and confidence >= MIN_REFINEMENT_CONFIDENCE
+            and len(content) > len(existing_memory.content)
+        ):
+            comparison = {**comparison, "relationship": "refinement"}
             return existing_memory, comparison, distance
 
     return None, None, None
@@ -410,7 +426,7 @@ async def search_memories_with_scores(
     conversation_id: UUID | None = None,
     only_active: bool = True,
 ) -> list[dict]:
-    query_embedding = await embed_text_async(query_text)
+    query_embedding = await embed_text_async(query_text, task="query")
 
     raw_results = await find_similar_memory(
         db,

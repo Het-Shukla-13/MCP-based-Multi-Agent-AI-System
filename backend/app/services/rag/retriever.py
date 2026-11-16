@@ -350,7 +350,7 @@ async def retrieve_pipeline(
             )
         return ""
 
-    user_query = await embed_text_async(query)
+    user_query = await embed_text_async(query, task="query")
     similar_chunks = await retrieve_similar_chunks(
         query,
         user_query,
