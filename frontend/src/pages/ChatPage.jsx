@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import ChatWindow from "../components/ChatWindow";
-import Sidebar from "../components/SideBar";
+import Sidebar from "../components/Sidebar";
 import {
   createConversation,
+  errorMessage,
   fetchAgents,
   fetchConversations,
   fetchConversationFiles,
@@ -11,9 +12,10 @@ import {
 import { useConversationSocket } from "../hooks/useConversationSocket";
 import { useConversationUploads } from "../hooks/useConversationUploads";
 
-const ACTIVE_USER_ID = import.meta.env.VITE_USER_ID ?? "";
-
-export default function ChatPage({ selectedAgent, setSelectedAgent, activeAgent, setActiveAgent }) {
+export default function ChatPage({ user, onLogout }) {
+  // Explicit agent pick (dropdown/@). Local state: it used to live in global
+  // localStorage, so one pick silently disabled routing in every conversation.
+  const [selectedAgent, setSelectedAgent] = useState(null);
   const [conversations, setConversations] = useState([]);
   const [selectedConversationId, setSelectedConversationId] = useState("");
   const [messagesByConversation, setMessagesByConversation] = useState({});
@@ -55,20 +57,13 @@ export default function ChatPage({ selectedAgent, setSelectedAgent, activeAgent,
     });
   };
 
-  const { activeAgent: socketActiveAgent, agentSwitched, connectionState, isSending, sendMessage } = useConversationSocket({
-    activeUserId: ACTIVE_USER_ID,
+  const { activeAgent, agentSwitched, connectionState, isSending, sendMessage } = useConversationSocket({
     selectedAgent,
     selectedConversationId,
     selectedConversation,
     setMessagesByConversation,
     setStatusMessage,
   });
-
-  useEffect(() => {
-    if (setActiveAgent && socketActiveAgent) {
-      setActiveAgent(socketActiveAgent);
-    }
-  }, [socketActiveAgent, setActiveAgent]);
 
   // Fetch agents list from the backend on mount
   useEffect(() => {
@@ -91,16 +86,10 @@ export default function ChatPage({ selectedAgent, setSelectedAgent, activeAgent,
     let isMounted = true;
 
     async function loadConversations() {
-      if (!ACTIVE_USER_ID) {
-        setStatusMessage("Set VITE_USER_ID before loading chats.");
-        setIsConversationListLoading(false);
-        return;
-      }
-
       setIsConversationListLoading(true);
 
       try {
-        const data = await fetchConversations(ACTIVE_USER_ID);
+        const data = await fetchConversations();
         if (!isMounted) {
           return;
         }
@@ -116,17 +105,14 @@ export default function ChatPage({ selectedAgent, setSelectedAgent, activeAgent,
         setStatusMessage(
           sorted.length > 0
             ? "Conversations loaded."
-            : "No conversations found for the configured user."
+            : "No conversations yet. Start a new chat."
         );
       } catch (error) {
         if (!isMounted) {
           return;
         }
 
-        setStatusMessage(
-          error.response?.data?.detail ||
-            "Could not load conversations from the backend."
-        );
+        setStatusMessage(errorMessage(error, "Could not load conversations from the backend."));
       } finally {
         if (isMounted) {
           setIsConversationListLoading(false);
@@ -191,16 +177,7 @@ export default function ChatPage({ selectedAgent, setSelectedAgent, activeAgent,
     setIsCreatingConversation(true);
 
     try {
-      if (!ACTIVE_USER_ID) {
-        setStatusMessage("Set VITE_USER_ID before creating chats.");
-        return;
-      }
-
-      const conversation = await createConversation({
-        title: `New Chat ${conversations.length + 1}`,
-        user_id: ACTIVE_USER_ID,
-        convo_metadata: null,
-      });
+      const conversation = await createConversation(`New Chat ${conversations.length + 1}`);
 
       setConversations((current) => [conversation, ...current]);
       setSelectedConversationId(conversation.id);
@@ -243,28 +220,6 @@ export default function ChatPage({ selectedAgent, setSelectedAgent, activeAgent,
     mergeConversationFiles,
     setStatusMessage,
   });
-
-  const refreshSelectedConversation = async (conversationId) => {
-    const targetConversationId = conversationId || selectedConversationId;
-    if (!targetConversationId) {
-      return;
-    }
-
-    const [latestMessages, latestFiles] = await Promise.all([
-      fetchMessages(targetConversationId),
-      fetchConversationFiles(targetConversationId),
-    ]);
-
-    setConversationMessages(
-      targetConversationId,
-      [...latestMessages].sort(
-        (left, right) =>
-          new Date(left.created_at).getTime() -
-          new Date(right.created_at).getTime()
-      )
-    );
-    mergeConversationFiles(targetConversationId, latestFiles);
-  };
 
   const hasPendingConversationFiles = useMemo(
     () =>
@@ -447,6 +402,8 @@ export default function ChatPage({ selectedAgent, setSelectedAgent, activeAgent,
   return (
     <div className="app-shell">
       <Sidebar
+        user={user}
+        onLogout={onLogout}
         conversations={conversations}
         isConversationListLoading={isConversationListLoading}
         isCreatingConversation={isCreatingConversation}

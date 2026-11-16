@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { getGeneratedFileRawUrl, getGeneratedFilePreviewUrl } from "../lib/api";
+import { generatedFileUrl } from "../lib/api";
 
 const AGENT_ICONS = {
   general:  "🤖",
@@ -131,11 +131,7 @@ export default function MessageList({
                     <div className="message-file" key={file.id}>
                       <a
                         className="message-file__name"
-                        href={
-                          file.file_type === "application/pdf"
-                            ? getGeneratedFileRawUrl(file.id)
-                            : getGeneratedFilePreviewUrl(file.id)
-                        }
+                        href={generatedFileUrl(file.id, "preview")}
                         rel="noreferrer"
                         target="_blank"
                       >
