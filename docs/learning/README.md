@@ -24,6 +24,8 @@ One note per branch, in the order the work was done. Each note covers: the conce
 | 18 | `feature/fe-auth` | Interceptors, tokens in URLs, case-sensitive imports, CORS-masked 500s |
 | 19 | `feature/fe-streaming` | WebSocket event handling, draft vs saved messages, derived state |
 | 20 | `feature/fe-markdown` | Safe Markdown rendering, no raw HTML, tokenised file URLs, memo |
+| 21 | `fix/adk-context-leak` | Inspecting model input, ADK before_model_callback |
+| 22 | `feature/fe-composer` | Mention parsing, per-conversation state, drag-and-drop, client vs server validation |
 
 ## Branching workflow
 - `develop-be` is cut from `main`, with the latest feature branch merged in.
