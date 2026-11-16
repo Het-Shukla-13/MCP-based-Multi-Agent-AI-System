@@ -65,3 +65,21 @@ def test_agents_get_least_privilege_tool_views():
 
     assert "read_file" not in AGENT_TOOLS["general"]["files"]
     assert "read_file" in AGENT_TOOLS["document"]["files"]
+
+
+def test_routing_bookkeeping_turns_are_removed_from_sub_agent_input():
+    from types import SimpleNamespace as NS
+    from app.agent_layer.core.base import strip_routing_context
+
+    def turn(*texts):
+        return NS(role="user", parts=[NS(text=t) for t in texts])
+
+    request = NS(contents=[
+        turn("Say hi"),
+        turn("For context:", "[root] called tool `transfer_to_agent` with parameters: {'agent_name': 'general'}"),
+        turn("For context:", "[root] `transfer_to_agent` tool returned result: {'result': None}"),
+        turn("For context:", "[code] said something unrelated"),  # not routing: kept
+    ])
+    strip_routing_context(None, request)
+    assert [[p.text for p in c.parts][0] for c in request.contents] == ["Say hi", "For context:"]
+    assert "transfer_to_agent" not in str([p.text for c in request.contents for p in c.parts])

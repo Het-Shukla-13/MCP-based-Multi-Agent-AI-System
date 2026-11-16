@@ -75,6 +75,26 @@ async def emit_text_delta(on_status: StatusCallback | None, event: Any) -> None:
             await emit_status(on_status, {"status": "delta", "agent": event.author, "text": text})
 
 
+def _is_routing_bookkeeping(content: Any) -> bool:
+    """ADK's 'For context: [root] ... transfer_to_agent ...' turns (see strip_routing_context)."""
+    texts = [getattr(p, "text", None) or "" for p in (getattr(content, "parts", None) or [])]
+    return bool(texts) and texts[0].strip() == "For context:" and any("transfer_to_agent" in t for t in texts)
+
+
+def strip_routing_context(callback_context: Any, llm_request: Any) -> None:
+    """
+    before_model_callback for sub-agents.
+
+    After the root delegates, ADK appends the root's transfer_to_agent call and result
+    to the sub-agent's input as extra USER turns ("For context: [root] called tool
+    transfer_to_agent ..."). The model sees them as things the user said and sometimes
+    repeats them in the reply. They carry no information for the answer, so drop them.
+    Returning None lets the (edited) request proceed.
+    """
+    llm_request.contents = [c for c in llm_request.contents if not _is_routing_bookkeeping(c)]
+    return None
+
+
 async def emit_tool_events(on_status: StatusCallback | None, event: Any) -> None:
     """Report MCP tool calls (not ADK's internal transfer_to_agent) as status events."""
     content = getattr(event, "content", None)
@@ -168,6 +188,7 @@ class BaseAgent(ABC):
         # MCP tools for this agent (least-privilege view of shared servers).
         adk_agent.tools = list(get_toolsets_for_agent(self.name))
         adk_agent.before_tool_callback = self._identity_injector(context)
+        adk_agent.before_model_callback = strip_routing_context
         return adk_agent
 
     def _identity_injector(self, context: AgentContext):
