@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   createMemory,
   errorMessage,
@@ -87,17 +87,21 @@ function MemoriesTab({ onError }) {
   const [newContent, setNewContent] = useState("");
   const [newType, setNewType] = useState("preference");
   const [loading, setLoading] = useState(true);
+  // Requests can finish out of order (e.g. a slow "active only" list arriving after
+  // a newer "include inactive" list). Only the LATEST request may update the list.
+  const latestRequest = useRef(0);
 
   const load = useCallback(async () => {
+    const requestId = ++latestRequest.current;
     try {
       const data = isSearch && query.trim()
         ? await searchMemories(query.trim())
         : await listMemories({ includeInactive: showInactive });
-      setMemories(data);
+      if (requestId === latestRequest.current) setMemories(data);
     } catch (err) {
-      onError(errorMessage(err, "Could not load memories."));
+      if (requestId === latestRequest.current) onError(errorMessage(err, "Could not load memories."));
     } finally {
-      setLoading(false);
+      if (requestId === latestRequest.current) setLoading(false);
     }
   }, [isSearch, query, showInactive, onError]);
 
@@ -149,12 +153,15 @@ function MemoriesTab({ onError }) {
 
 function ProfileTab({ onError }) {
   const [profile, setProfile] = useState(null);
+  const latestRequest = useRef(0); // ignore responses that a newer request superseded
 
   const load = useCallback(
-    (rebuild = false) =>
-      (rebuild ? rebuildProfile() : fetchProfile())
-        .then(setProfile) // state is set when the request resolves, not synchronously
-        .catch((err) => onError(errorMessage(err, "Could not load the profile."))),
+    (rebuild = false) => {
+      const requestId = ++latestRequest.current;
+      return (rebuild ? rebuildProfile() : fetchProfile())
+        .then((data) => requestId === latestRequest.current && setProfile(data))
+        .catch((err) => requestId === latestRequest.current && onError(errorMessage(err, "Could not load the profile.")));
+    },
     [onError]
   );
 
