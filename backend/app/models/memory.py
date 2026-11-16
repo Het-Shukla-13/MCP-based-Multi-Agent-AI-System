@@ -3,12 +3,21 @@ from typing import Optional
 from uuid import UUID, uuid4
 
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import Column, DateTime, Float, JSON, String, Text
+from sqlalchemy import Column, DateTime, Float, Index, JSON, String, Text
 from sqlmodel import Field, SQLModel
 
 
 class Memory(SQLModel, table=True):
     __tablename__ = "memory"
+    __table_args__ = (
+        # Memory search uses l2_distance (ltm_service), so the index uses vector_l2_ops.
+        Index(
+            "memory_embedding_idx",
+            "embedding",
+            postgresql_using="hnsw",
+            postgresql_ops={"embedding": "vector_l2_ops"},
+        ),
+    )
 
     id: UUID = Field(default_factory=uuid4, primary_key=True)
 

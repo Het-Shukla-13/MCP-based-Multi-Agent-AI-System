@@ -46,13 +46,14 @@ def _normalize_text(text: str | None) -> str:
 
 
 def _section_key(chunk: dict[str, Any]) -> str:
+    # Check for None BEFORE converting to str: str(None) == "None" is truthy,
+    # which made every non-PDF chunk fall into one "None" section.
     metadata = chunk.get("metadata") or {}
-    return (
-        str(metadata.get("section_id"))
-        or str(metadata.get("sheet"))
-        or str(metadata.get("filename"))
-        or str(chunk.get("id"))
-    )
+    for key in ("section_id", "sheet", "filename"):
+        value = metadata.get(key)
+        if value is not None and str(value).strip():
+            return f"{key}:{value}"
+    return f"chunk:{chunk.get('id')}"
 
 
 def _section_label(chunk: dict[str, Any]) -> str:
@@ -233,7 +234,8 @@ async def retrieve_similar_chunks(
             File.user_id == user_id,
             File.status == "processed",
         )
-        .order_by(Chunk.embedding.l2_distance(query_embedding))
+        # cosine_distance matches the HNSW index (vector_cosine_ops) on chunk.embedding.
+        .order_by(Chunk.embedding.cosine_distance(query_embedding))
         .limit(candidate_limit)
     )
     result = await db.execute(query)
