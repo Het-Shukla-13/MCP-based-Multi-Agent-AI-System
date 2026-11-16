@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import ChatWindow from "../components/ChatWindow";
 import Sidebar from "../components/Sidebar";
 import MemoryPanel from "../components/MemoryPanel";
@@ -67,11 +67,26 @@ export default function ChatPage({ user, onLogout }) {
 
   const pinnedAgent = pinnedAgentByConversation[selectedConversationId] || null;
 
+  // After a reconnect, reload the conversation from the server: a reply that
+  // finished while we were offline would otherwise never appear.
+  const resyncConversation = useCallback(async (conversationId) => {
+    try {
+      const latest = await fetchMessages(conversationId);
+      setMessagesByConversation((current) => ({
+        ...current,
+        [conversationId]: [...latest].sort((a, b) => new Date(a.created_at) - new Date(b.created_at)),
+      }));
+    } catch {
+      // Not fatal: the next successful load will catch up.
+    }
+  }, []);
+
   const { agentStatus, connectionState, isSending, sendMessage } = useConversationSocket({
     selectedAgent: pinnedAgent,
     selectedConversationId,
     setMessagesByConversation,
     setStatusMessage,
+    onResync: resyncConversation,
   });
 
   // Derived, not stored: the agent that wrote the latest reply, else the saved state.
