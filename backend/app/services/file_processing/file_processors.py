@@ -8,6 +8,7 @@ from typing import List, Dict
 import pymupdf4llm
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 import pandas as pd
+from app.services.file_processing.tabular import read_csv_robust
 from docx import Document
 import pytesseract
 from fastapi import HTTPException
@@ -171,7 +172,7 @@ def process_code(file_path: str) -> list[dict[str, Any]]:
     return chunks
 
 def process_csv(file_path: str) -> list[dict[str, Any]]:
-    df = pd.read_csv(file_path)
+    df = read_csv_robust(file_path)
     chunks=chunk_dataframe(df, file_path)
     return chunks
 

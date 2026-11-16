@@ -7,13 +7,36 @@ from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
 from google.genai.types import Content, Part
 
+from collections.abc import Awaitable, Callable
+from typing import Any
+
 from app.agent_layer.schemas import AgentContext, AgentResponse
-from app.agent_layer.tools.registry import tool_registry
+from app.agent_layer.tools.mcp_registry import IDENTITY_ARGS, get_toolsets_for_agent
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
 APP_NAME = "agent_system"
+
+StatusCallback = Callable[[dict], Awaitable[None]]
+
+
+async def emit_status(on_status: StatusCallback | None, event: dict) -> None:
+    if on_status is None:
+        return
+    try:
+        await on_status(event)
+    except Exception:  # a closed socket must never break the turn
+        logger.warning("Status callback failed", exc_info=True)
+
+
+async def emit_tool_events(on_status: StatusCallback | None, event: Any) -> None:
+    """Report MCP tool calls (not ADK's internal transfer_to_agent) as status events."""
+    content = getattr(event, "content", None)
+    for part in getattr(content, "parts", None) or []:
+        call = getattr(part, "function_call", None)
+        if call is not None and call.name != "transfer_to_agent":
+            await emit_status(on_status, {"status": "tool", "agent": event.author, "tool": call.name})
 
 
 class BaseAgent(ABC):
@@ -38,7 +61,6 @@ class BaseAgent(ABC):
     label: str = ""
     # Shown to the root agent's model by ADK: this text IS the routing criterion.
     description: str = ""
-    tools: list[str] = []
 
     @abstractmethod
     def _build_adk_agent(self) -> LlmAgent:
@@ -99,10 +121,38 @@ class BaseAgent(ABC):
         # back to the root or sideways to another agent.
         adk_agent.disallow_transfer_to_parent = True
         adk_agent.disallow_transfer_to_peers = True
+
+        # MCP tools for this agent (least-privilege view of shared servers).
+        adk_agent.tools = list(get_toolsets_for_agent(self.name))
+        adk_agent.before_tool_callback = self._identity_injector(context)
         return adk_agent
 
+    def _identity_injector(self, context: AgentContext):
+        """
+        Never trust identifiers chosen by the model: a prompt-injected document could
+        ask a tool to read another user's files. Overwrite them with the real request
+        identity before EVERY tool call.
+        """
+        identity = {"user_id": context.user_id, "conversation_id": context.conversation_id}
 
-    async def _run_with_model(self, context: AgentContext, prompt: str, model: str) -> str:
+        def before_tool(tool, args: dict, tool_context):
+            for key in IDENTITY_ARGS:
+                if key in args or key in identity:
+                    args[key] = identity[key]
+            logger.info("Tool call | agent=%s | tool=%s | args=%s", self.name, tool.name,
+                        {k: v for k, v in args.items() if k not in IDENTITY_ARGS})
+            return None  # None = proceed with the (patched) call
+
+        return before_tool
+
+
+    async def _run_with_model(
+        self,
+        context: AgentContext,
+        prompt: str,
+        model: str,
+        on_status: StatusCallback | None = None,
+    ) -> str:
         """Run one ADK turn on `model` without blocking the event loop."""
         started_at = perf_counter()
         logger.info(
@@ -127,6 +177,7 @@ class BaseAgent(ABC):
             session_id=session.id,
             new_message=Content(role="user", parts=[Part.from_text(text=prompt)]),
         ):
+            await emit_tool_events(on_status, event)
             # Read text Parts directly; str(event.content) would leak the object repr.
             content = getattr(event, "content", None)
             for part in getattr(content, "parts", None) or []:
@@ -140,7 +191,7 @@ class BaseAgent(ABC):
         )
         return final_text
 
-    async def run(self, context: AgentContext) -> AgentResponse:
+    async def run(self, context: AgentContext, on_status: StatusCallback | None = None) -> AgentResponse:
         context = await self.prepare_context(context)
         prompt = self.build_prompt(context)
         primary_model = settings.AGENT_MODEL
@@ -151,7 +202,7 @@ class BaseAgent(ABC):
         )
 
         try:
-            final_text = await self._run_with_model(context, prompt, primary_model)
+            final_text = await self._run_with_model(context, prompt, primary_model, on_status)
         except Exception as primary_exc:
             fallback_model = settings.AGENT_FALLBACK_MODEL
             if not (self._is_quota_error(primary_exc) and fallback_model):
@@ -161,17 +212,13 @@ class BaseAgent(ABC):
                 self.name, primary_model, fallback_model, primary_exc,
             )
             # Fallback uses its own fresh agent object; nothing shared is mutated.
-            final_text = await self._run_with_model(context, prompt, fallback_model)
+            final_text = await self._run_with_model(context, prompt, fallback_model, on_status)
 
         return AgentResponse(
             content=final_text.strip(),
             agent_name=self.name,
             selected_agent=context.selected_agent,
         )
-
-    async def execute_tool(self, tool_name: str, **kwargs):
-        tool = tool_registry.get(tool_name)
-        return await tool.execute(**kwargs)
 
     async def prepare_context(self, context: AgentContext) -> AgentContext:
         return context

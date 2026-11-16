@@ -11,6 +11,7 @@ from app.api.file import router as file_router
 from app.api.file_generation import router as file_generation_router
 from app.api.chat import router as chat_router
 from app.services.file_processing.file_task_dispatcher import shutdown_local_file_task_executor
+from app.agent_layer.tools.mcp_registry import close_all_toolsets
 from app.api.memory import router as memory_router
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -57,5 +58,6 @@ async def health_check():
 
 
 @app.on_event("shutdown")
-def shutdown_file_task_dispatcher():
+async def shutdown_background_workers():
     shutdown_local_file_task_executor()
+    await close_all_toolsets()  # stop MCP server child processes
