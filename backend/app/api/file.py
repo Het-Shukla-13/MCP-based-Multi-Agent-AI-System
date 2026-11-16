@@ -29,12 +29,12 @@ async def upload_file(
     created_files = []
     queued_jobs: list[tuple[str, str]] = []
     for file in files:
-        path, size = await validate_and_save_file_to_storage(file)
+        path, size, mime_type = await validate_and_save_file_to_storage(file)
         payload = FileCreate(
             conversation_id=conversation_id,
             user_id=conversation.user_id,
             filename=file.filename,
-            file_type=file.content_type,
+            file_type=mime_type,  # verified from content, not the client's claim
             file_size=size,
             storage_path=path,
         )

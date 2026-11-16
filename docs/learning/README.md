@@ -9,6 +9,7 @@ One note per branch, in the order the work was done. Each note covers: the conce
 | 03 | `fix/agent-isolation-and-async` | Shared mutable state, event loop blocking, sticky routing |
 | 04 | `fix/memory-pipeline-crashes` | Model-vs-dict contracts, return-type honesty, silent failures |
 | 05 | `fix/migrations-and-vector-index` | Alembic chains, squashing, pgvector operators and HNSW, FK cascade |
+| 06 | `fix/file-attachments-and-types` | Streaming uploads, magic bytes, dependencies, Future exceptions, Celery queues |
 
 ## Branching workflow
 - `develop-be` is cut from `main`, with the latest feature branch merged in.

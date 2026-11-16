@@ -165,14 +165,10 @@ def process_image(file_path: str) -> list[str]:
     return chunks
 
 def process_code(file_path: str) -> list[dict[str, Any]]:
-    print("STEP 1: reading file")
     with open(file_path, "r", encoding="utf-8") as f:
         file_content = f.read()
-    print("STEP 2: file read done")
     filename = os.path.basename(file_path)
-    print("STEP 3: calling AST chunking")
     chunks = chunk_code_ast(file_content, filename)
-    print("STEP 4: chunking done")
     return chunks
 
 def process_csv(file_path: str) -> list[dict[str, Any]]:

@@ -19,6 +19,10 @@ celery_app = Celery(
     **celery_kwargs,
 )
 
+# Tasks are routed to the "default" queue. The worker must consume the SAME queue;
+# making it the default queue means a plain `celery ... worker` listens on it
+# (previously the worker listened on "celery" and tasks waited forever).
+celery_app.conf.task_default_queue = "default"
 celery_app.conf.task_routes = {
     "app.tasks.*": {"queue": "default"}
 }

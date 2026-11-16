@@ -144,15 +144,16 @@ async def generate_ai_response(
 def build_ai_message_payload(
     user_message: Message,
     ai_content: str,
-    file_ids: list | None = None,
 ) -> MessageCreate:
+    # Uploaded files belong to the USER message. Passing them here made
+    # _attach_files_to_message re-point file.message_id to the AI reply.
     return MessageCreate(
         user_id=user_message.user_id,
         conversation_id=user_message.conversation_id,
         content=ai_content,
         role="assistant",
         token_count=None,
-        file_ids=file_ids or [],
+        file_ids=[],
     )
 
 
@@ -285,11 +286,7 @@ async def send_message(
     if not ai_content:
         ai_content = EMPTY_RESPONSE_FALLBACK
 
-    ai_message = build_ai_message_payload(
-        user_message,
-        ai_content,
-        file_ids=payload.file_ids,
-    )
+    ai_message = build_ai_message_payload(user_message, ai_content)
     ai_message.token_count = get_message_token_count(ai_message)
     create_ai_started_at = perf_counter()
     ai_message = await create_message(db, ai_message)
