@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { ensureFreshToken } from "../lib/api";
 import { buildConversationWebSocketUrl } from "../lib/socket";
 
 /**
@@ -59,70 +60,84 @@ export function useConversationSocket({
   useEffect(() => {
     if (!selectedConversationId) return undefined;
     const conversationId = selectedConversationId;
-    const socket = new WebSocket(buildConversationWebSocketUrl(conversationId));
-    socketRef.current = socket;
-    const isCurrent = () => socketRef.current === socket;
+    let socket = null;
+    let cancelled = false;
+    const isCurrent = () => socket !== null && socketRef.current === socket;
     const finishTurn = () => {
       setSendingConversationId((c) => (c === conversationId ? "" : c));
       setAgentStatus(null);
     };
 
-    socket.onopen = () => isCurrent() && setConnection({ conversationId, state: "connected" });
+    const wire = () => {
+      socket.onopen = () => isCurrent() && setConnection({ conversationId, state: "connected" });
 
-    socket.onmessage = (event) => {
-      if (!isCurrent()) return;
-      const payload = JSON.parse(event.data);
-      const data = payload.data || {};
+      socket.onmessage = (event) => {
+        if (!isCurrent()) return;
+        const payload = JSON.parse(event.data);
+        const data = payload.data || {};
 
-      if (payload.type === "agent_status") {
-        setAgentStatus({ conversationId, status: data.status, agent: data.agent, tool: data.tool });
-        return;
-      }
+        if (payload.type === "agent_status") {
+          setAgentStatus({ conversationId, status: data.status, agent: data.agent, tool: data.tool });
+          return;
+        }
 
-      if (payload.type === "chat_delta") {
-        updateMessages(conversationId, (messages) => {
-          const draft = messages.find((m) => m.id === DRAFT_ID);
-          if (draft) {
-            return messages.map((m) => (m.id === DRAFT_ID ? { ...m, content: m.content + data.text } : m));
-          }
-          return [
-            ...messages,
-            { id: DRAFT_ID, role: "assistant", content: data.text, agent_name: data.agent, streaming: true, created_at: new Date().toISOString() },
-          ];
-        });
-        return;
-      }
+        if (payload.type === "chat_delta") {
+          updateMessages(conversationId, (messages) => {
+            const draft = messages.find((m) => m.id === DRAFT_ID);
+            if (draft) {
+              return messages.map((m) => (m.id === DRAFT_ID ? { ...m, content: m.content + data.text } : m));
+            }
+            return [
+              ...messages,
+              { id: DRAFT_ID, role: "assistant", content: data.text, agent_name: data.agent, streaming: true, created_at: new Date().toISOString() },
+            ];
+          });
+          return;
+        }
 
-      if (payload.type === "chat") {
-        const aiMessage = { ...data.ai_message, error: data.error === true };
-        updateMessages(conversationId, (messages) => replaceWithSaved(messages, data.user_message, aiMessage));
+        if (payload.type === "chat") {
+          const aiMessage = { ...data.ai_message, error: data.error === true };
+          updateMessages(conversationId, (messages) => replaceWithSaved(messages, data.user_message, aiMessage));
+          finishTurn();
+          setStatusMessage(data.error ? "The assistant could not complete that request." : "");
+          return;
+        }
+
+        if (payload.type === "error") {
+          updateMessages(conversationId, (messages) => messages.filter((m) => !m.pending && m.id !== DRAFT_ID));
+          finishTurn();
+          setStatusMessage(payload.detail || "Failed to process the message.");
+        }
+      };
+
+      socket.onerror = () => {
+        if (!isCurrent()) return;
+        setConnection({ conversationId, state: "error" });
         finishTurn();
-        setStatusMessage(data.error ? "The assistant could not complete that request." : "");
-        return;
-      }
+        setStatusMessage("Connection problem. Reconnect by reopening the chat.");
+      };
 
-      if (payload.type === "error") {
-        updateMessages(conversationId, (messages) => messages.filter((m) => !m.pending && m.id !== DRAFT_ID));
+      socket.onclose = () => {
+        if (!isCurrent()) return;
+        setConnection({ conversationId, state: "closed" });
         finishTurn();
-        setStatusMessage(payload.detail || "Failed to process the message.");
-      }
+      };
     };
 
-    socket.onerror = () => {
-      if (!isCurrent()) return;
-      setConnection({ conversationId, state: "error" });
-      finishTurn();
-      setStatusMessage("Connection problem. Reconnect by reopening the chat.");
-    };
-
-    socket.onclose = () => {
-      if (!isCurrent()) return;
-      setConnection({ conversationId, state: "closed" });
-      finishTurn();
-    };
+    // A WebSocket can't "retry on 401" like an HTTP call, so make sure the access
+    // token is fresh BEFORE connecting (refreshes it if it expires within a minute).
+    ensureFreshToken()
+      .then(() => {
+        if (cancelled) return;
+        socket = new WebSocket(buildConversationWebSocketUrl(conversationId));
+        socketRef.current = socket;
+        wire();
+      })
+      .catch(() => {}); // refresh failed -> session cleared -> app shows sign-in
 
     return () => {
-      socket.close();
+      cancelled = true;
+      if (socket) socket.close();
       if (socketRef.current === socket) socketRef.current = null;
     };
   }, [selectedConversationId, setStatusMessage, updateMessages]);

@@ -1,5 +1,5 @@
 import axios from "axios";
-import { clearToken, getToken } from "./auth";
+import { accessTokenExpiresSoon, clearToken, getRefreshToken, getToken, setSession } from "./auth";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000";
 
@@ -12,14 +12,75 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
-// An expired or invalid token logs the user out everywhere at once.
+// Plain client for /auth/refresh: it must not go through the interceptors below
+// (a failing refresh would otherwise try to refresh itself).
+const authClient = axios.create({ baseURL: API_BASE_URL });
+
+/**
+ * Single-flight refresh: concurrent callers share ONE in-flight request. Two
+ * parallel refreshes would rotate the token twice; the server sees the second as
+ * reuse of a revoked token (= theft) and ends the whole session.
+ */
+let refreshInFlight = null;
+
+export function refreshSession() {
+  if (!refreshInFlight) {
+    const refreshToken = getRefreshToken();
+    refreshInFlight = (refreshToken
+      ? authClient.post("/auth/refresh", { refresh_token: refreshToken }).then(({ data }) => {
+          setSession(data);
+          return data.access_token;
+        })
+      : Promise.reject(new Error("No refresh token"))
+    )
+      .catch((error) => {
+        clearToken(); // refresh failed: the session is over, back to sign-in
+        throw error;
+      })
+      .finally(() => {
+        refreshInFlight = null;
+      });
+  }
+  return refreshInFlight;
+}
+
+/** Valid access token for things that can't retry on 401 (opening a WebSocket). */
+export async function ensureFreshToken() {
+  if (getToken() && !accessTokenExpiresSoon()) return getToken();
+  return refreshSession();
+}
+
+// 401 -> refresh once, then replay the original request with the new token.
 api.interceptors.response.use(
   (response) => response,
-  (error) => {
-    if (error.response?.status === 401 && getToken()) clearToken();
-    return Promise.reject(error);
+  async (error) => {
+    const original = error.config;
+    if (error.response?.status !== 401 || !original || original._retried || !getRefreshToken()) {
+      return Promise.reject(error);
+    }
+    original._retried = true; // never loop: a second 401 is final
+    try {
+      const token = await refreshSession();
+      original.headers.Authorization = `Bearer ${token}`;
+      return api(original);
+    } catch {
+      return Promise.reject(error);
+    }
   }
 );
+
+/** Sign out everywhere: revoke on the server, then forget locally. */
+export async function logout() {
+  const refreshToken = getRefreshToken();
+  clearToken();
+  if (refreshToken) {
+    try {
+      await authClient.post("/auth/logout", { refresh_token: refreshToken });
+    } catch {
+      // Already signed out locally; an unreachable server is not a reason to stay signed in.
+    }
+  }
+}
 
 export function getApiBaseUrl() {
   return API_BASE_URL;
