@@ -18,6 +18,11 @@ class AgentContext(BaseModel):
     # METADATA
     conversation_metadata: Dict = {}
 
+    # Agent that answered the previous turn. Passed explicitly (not read from
+    # conversation_metadata, which the memory router may leave empty) so the
+    # LLM router can keep the conversation "sticky" to the current agent.
+    previous_agent: str = "general"
+
     # The agent to route to. If set by the frontend (@mention), it bypasses LLM routing.
     # If None, the LLM selector picks the best agent.
     selected_agent: Optional[str] = Field(
