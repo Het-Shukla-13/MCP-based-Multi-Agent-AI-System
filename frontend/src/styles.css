@@ -780,3 +780,39 @@ button {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* ---------- Streaming / status ---------- */
+.stream-cursor {
+  display: inline-block;
+  margin-left: 2px;
+  animation: blink 1s steps(2, start) infinite;
+  color: #38bdf8;
+}
+
+@keyframes blink {
+  to { visibility: hidden; }
+}
+
+.message--error {
+  border-color: rgba(239, 68, 68, 0.5) !important;
+  background: rgba(127, 29, 29, 0.25) !important;
+}
+
+.message-body {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.active-agent-dot--busy {
+  animation: pulse 1.2s ease-in-out infinite;
+}
+
+.active-agent-state {
+  margin-left: 0.5rem;
+  font-size: 0.75rem;
+  color: #94a3b8;
+}
+
+@keyframes pulse {
+  50% { opacity: 0.3; transform: scale(1.4); }
+}

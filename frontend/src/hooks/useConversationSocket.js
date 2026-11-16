@@ -1,225 +1,163 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { buildConversationWebSocketUrl } from "../lib/socket";
 
-function createTempMessage(content) {
+/**
+ * One WebSocket per open conversation.
+ *
+ * Server -> client events (see README "WebSocket protocol"):
+ *   agent_status  {status: routing|working|tool, agent, tool?}  live progress
+ *   chat_delta    {agent, text}                                streamed reply text
+ *   chat          {user_message, ai_message, active_agent, error}  final, saved
+ *
+ * The streamed text builds a local DRAFT message; the final "chat" event replaces
+ * it with the saved message (the server's copy is the source of truth).
+ */
+
+const DRAFT_ID = "draft-assistant";
+
+function createTempMessage(content, fileIds) {
   return {
     id: `temp-${crypto.randomUUID()}`,
     content,
     created_at: new Date().toISOString(),
     pending: true,
     role: "user",
+    file_ids: fileIds,
   };
 }
 
-function mergeIncomingMessages(currentMessages, userMessage, aiMessage) {
-  const nextMessages = [...currentMessages];
-  const pendingIndex = nextMessages.findIndex(
-    (message) =>
-      message.pending &&
-      message.role === "user" &&
-      message.content === userMessage.content
-  );
-
-  if (pendingIndex >= 0) {
-    nextMessages.splice(pendingIndex, 1, userMessage);
-  } else if (!nextMessages.some((message) => message.id === userMessage.id)) {
-    nextMessages.push(userMessage);
-  }
-
-  if (!nextMessages.some((message) => message.id === aiMessage.id)) {
-    nextMessages.push(aiMessage);
-  }
-
-  return nextMessages;
+function replaceWithSaved(messages, userMessage, aiMessage) {
+  const next = messages.filter((m) => m.id !== DRAFT_ID);
+  const pendingIndex = next.findIndex((m) => m.pending && m.role === "user");
+  if (pendingIndex >= 0) next.splice(pendingIndex, 1, userMessage);
+  else if (!next.some((m) => m.id === userMessage.id)) next.push(userMessage);
+  if (!next.some((m) => m.id === aiMessage.id)) next.push(aiMessage);
+  return next;
 }
 
 export function useConversationSocket({
   selectedAgent,
   selectedConversationId,
-  selectedConversation,
   setMessagesByConversation,
   setStatusMessage,
 }) {
   const socketRef = useRef(null);
+  // Keyed by conversation so switching chats never shows another chat's state.
+  const [connection, setConnection] = useState({ conversationId: null, state: "idle" });
   const [sendingConversationId, setSendingConversationId] = useState("");
-  const [connectionState, setConnectionState] = useState("idle");
-  const [activeAgent, setActiveAgent] = useState("general");
-  const [agentSwitched, setAgentSwitched] = useState(false);
-  const lastInitializedIdRef = useRef(null);
+  const [agentStatus, setAgentStatus] = useState(null); // {conversationId, status, agent, tool}
 
-  // Sync initial active agent state when conversation changes or loads
-  useEffect(() => {
-    if (selectedConversationId && selectedConversation) {
-      if (lastInitializedIdRef.current !== selectedConversationId) {
-        const metadata = selectedConversation.convo_metadata;
-        const savedAgent = metadata?.agent_state?.active_agent || "general";
-        setActiveAgent(savedAgent);
-        setAgentSwitched(false);
-        lastInitializedIdRef.current = selectedConversationId;
-      }
-    } else if (!selectedConversationId) {
-      setActiveAgent("general");
-      setAgentSwitched(false);
-      lastInitializedIdRef.current = null;
-    }
-  }, [selectedConversationId, selectedConversation]);
-
-  const isSending =
-    !!selectedConversationId && sendingConversationId === selectedConversationId;
-
-  const updateConversationMessages = (conversationId, updater) => {
-    setMessagesByConversation((current) => {
-      const previousMessages = current[conversationId] || [];
-      const nextMessages =
-        typeof updater === "function" ? updater(previousMessages) : updater;
-
-      return {
+  const updateMessages = useCallback(
+    (conversationId, updater) =>
+      setMessagesByConversation((current) => ({
         ...current,
-        [conversationId]: nextMessages,
-      };
-    });
-  };
-
-  const clearPendingMessages = (conversationId) => {
-    updateConversationMessages(conversationId, (currentMessages) =>
-      currentMessages.filter((message) => !message.pending)
-    );
-  };
+        [conversationId]: updater(current[conversationId] || []),
+      })),
+    [setMessagesByConversation]
+  );
 
   useEffect(() => {
-    if (!selectedConversationId) {
-      if (socketRef.current) {
-        socketRef.current.close();
-        socketRef.current = null;
-      }
-      setConnectionState("idle");
-      return;
-    }
-
+    if (!selectedConversationId) return undefined;
     const conversationId = selectedConversationId;
-    const socket = new WebSocket(
-      buildConversationWebSocketUrl(conversationId)
-    );
-
+    const socket = new WebSocket(buildConversationWebSocketUrl(conversationId));
     socketRef.current = socket;
-    setConnectionState("connecting");
-
-    socket.onopen = () => {
-      if (socketRef.current !== socket) {
-        return;
-      }
-      setConnectionState("connected");
+    const isCurrent = () => socketRef.current === socket;
+    const finishTurn = () => {
+      setSendingConversationId((c) => (c === conversationId ? "" : c));
+      setAgentStatus(null);
     };
 
+    socket.onopen = () => isCurrent() && setConnection({ conversationId, state: "connected" });
+
     socket.onmessage = (event) => {
-      if (socketRef.current !== socket) {
+      if (!isCurrent()) return;
+      const payload = JSON.parse(event.data);
+      const data = payload.data || {};
+
+      if (payload.type === "agent_status") {
+        setAgentStatus({ conversationId, status: data.status, agent: data.agent, tool: data.tool });
         return;
       }
 
-      const payload = JSON.parse(event.data);
+      if (payload.type === "chat_delta") {
+        updateMessages(conversationId, (messages) => {
+          const draft = messages.find((m) => m.id === DRAFT_ID);
+          if (draft) {
+            return messages.map((m) => (m.id === DRAFT_ID ? { ...m, content: m.content + data.text } : m));
+          }
+          return [
+            ...messages,
+            { id: DRAFT_ID, role: "assistant", content: data.text, agent_name: data.agent, streaming: true, created_at: new Date().toISOString() },
+          ];
+        });
+        return;
+      }
+
+      if (payload.type === "chat") {
+        const aiMessage = { ...data.ai_message, error: data.error === true };
+        updateMessages(conversationId, (messages) => replaceWithSaved(messages, data.user_message, aiMessage));
+        finishTurn();
+        setStatusMessage(data.error ? "The assistant could not complete that request." : "");
+        return;
+      }
 
       if (payload.type === "error") {
-        clearPendingMessages(conversationId);
-        setSendingConversationId((current) =>
-          current === conversationId ? "" : current
-        );
+        updateMessages(conversationId, (messages) => messages.filter((m) => !m.pending && m.id !== DRAFT_ID));
+        finishTurn();
         setStatusMessage(payload.detail || "Failed to process the message.");
-        return;
       }
-
-      if (payload.type !== "chat") {
-        return;
-      }
-
-      // Update active agent state from every WS message
-      if (payload.data.active_agent) {
-        setAgentSwitched(payload.data.agent_switched === true);
-        setActiveAgent(payload.data.active_agent);
-      }
-
-      updateConversationMessages(conversationId, (currentMessages) =>
-        mergeIncomingMessages(
-          currentMessages,
-          payload.data.user_message,
-          payload.data.ai_message
-        )
-      );
-      setSendingConversationId((current) =>
-        current === conversationId ? "" : current
-      );
-      setStatusMessage("Message delivered.");
     };
 
     socket.onerror = () => {
-      if (socketRef.current !== socket) {
-        return;
-      }
-
-      setConnectionState("error");
-      clearPendingMessages(conversationId);
-      setSendingConversationId((current) =>
-        current === conversationId ? "" : current
-      );
-      setStatusMessage("Websocket error while sending or receiving messages.");
+      if (!isCurrent()) return;
+      setConnection({ conversationId, state: "error" });
+      finishTurn();
+      setStatusMessage("Connection problem. Reconnect by reopening the chat.");
     };
 
     socket.onclose = () => {
-      if (socketRef.current !== socket) {
-        return;
-      }
-
-      setConnectionState("closed");
-      setSendingConversationId((current) =>
-        current === conversationId ? "" : current
-      );
+      if (!isCurrent()) return;
+      setConnection({ conversationId, state: "closed" });
+      finishTurn();
     };
 
     return () => {
       socket.close();
-      if (socketRef.current === socket) {
-        socketRef.current = null;
-      }
+      if (socketRef.current === socket) socketRef.current = null;
     };
-  }, [
-    selectedConversationId,
-    setMessagesByConversation,
-    setStatusMessage,
-  ]);
+  }, [selectedConversationId, setStatusMessage, updateMessages]);
 
-  const sendMessage = (content, attachedFileIds = []) => {
+  const sendMessage = (content, attachedFileIds = [], options = {}) => {
     const socket = socketRef.current;
-
-    if (
-      !selectedConversationId ||
-      !socket ||
-      socket.readyState !== WebSocket.OPEN
-    ) {
+    if (!selectedConversationId || !socket || socket.readyState !== WebSocket.OPEN) {
       setStatusMessage("Chat connection is not ready yet.");
-      return;
+      return false;
     }
-
-    updateConversationMessages(selectedConversationId, (currentMessages) => [
-      ...currentMessages,
-      createTempMessage(content),
-    ]);
-
+    updateMessages(selectedConversationId, (messages) => [...messages, createTempMessage(content, attachedFileIds)]);
     setSendingConversationId(selectedConversationId);
-    setStatusMessage("Sending message...");
+    setStatusMessage("");
     socket.send(
       JSON.stringify({
         content,
         file_ids: attachedFileIds,
-        // Pass the explicitly selected agent so the backend bypasses LLM routing
-        selected_agent: selectedAgent || null,
+        selected_agent: selectedAgent || null, // explicit pick skips the router
+        format: options.format || null,       // ask the agent for a downloadable file
       })
     );
+    return true;
   };
 
+  // Derived (not stored) state: what applies to the conversation on screen now.
+  const connectionState = !selectedConversationId
+    ? "idle"
+    : connection.conversationId === selectedConversationId
+      ? connection.state
+      : "connecting";
+
   return {
-    activeAgent,
-    agentSwitched,
+    agentStatus: agentStatus?.conversationId === selectedConversationId ? agentStatus : null,
     connectionState,
-    isSending,
+    isSending: !!selectedConversationId && sendingConversationId === selectedConversationId,
     sendMessage,
   };
 }

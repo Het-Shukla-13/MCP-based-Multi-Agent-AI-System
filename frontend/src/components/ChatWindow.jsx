@@ -1,19 +1,11 @@
 import MessageList from "./MessageList";
 import MessageInput from "./MessageInput";
-
-const AGENT_ICONS = {
-  general:  "🤖",
-  code:     "💻",
-  data:     "📊",
-  research: "🔍",
-  document: "📄",
-  image:    "🖼️",
-};
+import { agentIcon, agentLabel as labelFor } from "../lib/agents";
 
 export default function ChatWindow({
   activeAgent,
+  agentStatus,
   agents,
-  agentSwitched,
   attachedFiles,
   conversation,
   isLoading,
@@ -28,8 +20,8 @@ export default function ChatWindow({
   selectedAgent,
   onAgentSelect,
 }) {
-  const agentLabel = agents.find((a) => a.name === activeAgent)?.label || "General Assistant";
-  const agentIcon  = AGENT_ICONS[activeAgent] || "🤖";
+  const status = agentStatus?.agent && agentStatus.agent !== "root" ? agentStatus.agent : null;
+  const shownAgent = status || activeAgent;
 
   return (
     <section className="chat-window">
@@ -37,15 +29,15 @@ export default function ChatWindow({
       {conversation && (
         <div className="active-agent-bar">
           <span className="active-agent-indicator">
-            <span className="active-agent-dot" />
-            {agentIcon} {agentLabel}
+            <span className={`active-agent-dot${status ? " active-agent-dot--busy" : ""}`} />
+            {agentIcon(shownAgent)} {labelFor(agents, shownAgent)}
+            {status ? <span className="active-agent-state">working</span> : null}
           </span>
         </div>
       )}
 
       <MessageList
-        activeAgent={activeAgent}
-        agentSwitched={agentSwitched}
+        agentStatus={agentStatus}
         agents={agents}
         conversation={conversation}
         isLoading={isLoading}
