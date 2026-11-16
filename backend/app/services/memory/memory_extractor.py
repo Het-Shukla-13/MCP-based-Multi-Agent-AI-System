@@ -1,7 +1,4 @@
-import json
-from typing import Any
-
-from click import prompt
+from loguru import logger
 
 from app.services.llm import llm
 
@@ -20,6 +17,7 @@ async def extract_memories_from_text(conversation_text: str) -> list[MemoryExtra
             response_model=MemoryExtractionResponse
         )
     except Exception:
+        logger.exception("Memory extraction failed; no memories promoted this turn")
         return []
 
     return result.memories

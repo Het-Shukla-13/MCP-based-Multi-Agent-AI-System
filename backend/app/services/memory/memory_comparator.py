@@ -1,4 +1,5 @@
-import json
+from loguru import logger
+
 from app.schemas import MemoryComparisonResult
 
 from app.services.llm import llm
@@ -28,6 +29,7 @@ async def compare_memories(
         return response
 
     except Exception:
+        logger.exception("Memory comparison failed; treating memories as compatible")
         return MemoryComparisonResult(
             relationship="compatible",
             confidence=0.5,

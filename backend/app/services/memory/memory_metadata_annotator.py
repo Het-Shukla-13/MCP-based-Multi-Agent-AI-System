@@ -1,7 +1,4 @@
-import json
-from typing import Any
-
-from click import prompt
+from loguru import logger
 
 from app.services.llm import llm
 from app.schemas import MemoryProfileAnnotation
@@ -31,4 +28,5 @@ async def annotate_memory_profile_metadata(
         return response
 
     except Exception:
+        logger.exception("Memory profile annotation failed; using default annotation")
         return MemoryProfileAnnotation()

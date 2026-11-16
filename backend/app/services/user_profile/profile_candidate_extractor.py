@@ -1,3 +1,4 @@
+from loguru import logger
 import json
 from typing import Any
 
@@ -177,8 +178,9 @@ async def extract_profile_candidates_from_messages(
         )
 
     except Exception:
+        logger.exception("Profile candidate extraction failed; profile unchanged this turn")
         return []
-    
+
     cleaned_candidates = []
 
     for candidate in result.candidates:

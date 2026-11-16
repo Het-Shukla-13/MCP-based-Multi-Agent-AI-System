@@ -190,7 +190,9 @@ async def _check_duplicate_candidates(
             new_content=content,
             memory_type=memory_type,
         )
-
+        # compare_memories returns a Pydantic model; this function's contract
+        # (and the exact-match branch above) uses plain dicts.
+        comparison = comparison.model_dump()
         relationship = comparison.get("relationship")
         confidence = float(comparison.get("confidence", 0.5) or 0.5)
 
