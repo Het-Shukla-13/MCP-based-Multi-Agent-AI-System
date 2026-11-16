@@ -11,11 +11,12 @@ import {
 } from "../lib/api";
 import { useConversationSocket } from "../hooks/useConversationSocket";
 import { useConversationUploads } from "../hooks/useConversationUploads";
+import { checkFiles } from "../lib/uploads";
 
 export default function ChatPage({ user, onLogout }) {
-  // Explicit agent pick (dropdown/@). Local state: it used to live in global
-  // localStorage, so one pick silently disabled routing in every conversation.
-  const [selectedAgent, setSelectedAgent] = useState(null);
+  // Pinned agent PER CONVERSATION (it used to be one global localStorage value,
+  // so a pick in one chat silently disabled routing in every chat).
+  const [pinnedAgentByConversation, setPinnedAgentByConversation] = useState({});
   const [conversations, setConversations] = useState([]);
   const [selectedConversationId, setSelectedConversationId] = useState("");
   const [messagesByConversation, setMessagesByConversation] = useState({});
@@ -58,8 +59,10 @@ export default function ChatPage({ user, onLogout }) {
     });
   };
 
+  const pinnedAgent = pinnedAgentByConversation[selectedConversationId] || null;
+
   const { agentStatus, connectionState, isSending, sendMessage } = useConversationSocket({
-    selectedAgent,
+    selectedAgent: pinnedAgent,
     selectedConversationId,
     setMessagesByConversation,
     setStatusMessage,
@@ -305,10 +308,19 @@ export default function ChatPage({ user, onLogout }) {
       return;
     }
 
+    const { accepted, rejected } = checkFiles(files);
+    const rejectedNote = rejected.length
+      ? `Skipped: ${rejected.map((r) => `${r.name} (${r.reason})`).join(", ")}. `
+      : "";
+    if (accepted.length === 0) {
+      setStatusMessage(rejectedNote);
+      return;
+    }
+
     try {
       const uploadedFiles = await uploadFiles({
         conversationId: selectedConversationId,
-        files,
+        files: accepted,
       });
       setDraftFiles(selectedConversationId, (currentFiles) => [
         ...currentFiles,
@@ -316,12 +328,9 @@ export default function ChatPage({ user, onLogout }) {
           (file) => !currentFiles.some((currentFile) => currentFile.id === file.id)
         ),
       ]);
-      setStatusMessage("Files uploaded. Waiting for processing to finish...");
+      setStatusMessage(`${rejectedNote}Files uploaded. Waiting for processing to finish...`);
     } catch (error) {
-      setStatusMessage(
-        error.response?.data?.detail ||
-          "Could not upload files for this conversation."
-      );
+      setStatusMessage(rejectedNote + errorMessage(error, "Could not upload files for this conversation."));
     }
   };
 
@@ -351,9 +360,8 @@ export default function ChatPage({ user, onLogout }) {
     return sendMessage(content, fileIds, { format });
   };
 
-  const handleAgentSelect = (agentName) => {
-    // agentName is null when user clears selection (auto-route resumes)
-    setSelectedAgent(agentName || null);
+  const handlePinAgent = (agentName) => {
+    setPinnedAgentByConversation((current) => ({ ...current, [selectedConversationId]: agentName || null }));
   };
 
 
@@ -443,8 +451,8 @@ export default function ChatPage({ user, onLogout }) {
           onClearAttachedFiles={handleClearAttachedFiles}
           onRemoveAttachedFile={handleRemoveAttachedFile}
           onSend={handleSendMessage}
-          onAgentSelect={handleAgentSelect}
-          selectedAgent={selectedAgent}
+          onPinAgent={handlePinAgent}
+          pinnedAgent={pinnedAgent}
           sendDisabledReason={sendDisabledReason}
         />
       </main>

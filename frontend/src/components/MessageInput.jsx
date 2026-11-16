@@ -1,13 +1,25 @@
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useEffect, useRef, useState } from "react";
+import { agentIcon, agentLabel } from "../lib/agents";
+import { ACCEPT_ATTRIBUTE } from "../lib/uploads";
 
-const AGENT_ICONS = {
-  general:  "🤖",
-  code:     "💻",
-  data:     "📊",
-  research: "🔍",
-  document: "📄",
-  image:    "🖼️",
-};
+const FILE_FORMATS = [
+  { value: "", label: "Reply in chat" },
+  { value: "pdf", label: "Reply as PDF" },
+  { value: "md", label: "Reply as Markdown" },
+  { value: "txt", label: "Reply as text file" },
+  { value: "csv", label: "Reply as CSV" },
+  { value: "json", label: "Reply as JSON" },
+];
+
+/**
+ * Find an "@word" being typed right before the cursor. Only counts when the "@" is
+ * at the start or after whitespace, so e-mail addresses ("me@code.dev") don't open
+ * the agent menu (the backend's mention parser uses the same rule).
+ */
+function findMention(value, cursor) {
+  const match = /(^|\s)@([a-z_]*)$/i.exec(value.slice(0, cursor));
+  return match ? { query: match[2].toLowerCase(), start: cursor - match[2].length - 1 } : null;
+}
 
 export default function MessageInput({
   agents,
@@ -20,171 +32,129 @@ export default function MessageInput({
   onRemoveAttachedFile,
   onSend,
   sendDisabledReason,
-  selectedAgent,
-  onAgentSelect,
+  pinnedAgent,
+  onPinAgent,
 }) {
   const [text, setText] = useState("");
-  const [mentionQuery, setMentionQuery] = useState(null); // null = closed, "" = open with no filter
-  const [highlightedIndex, setHighlightedIndex] = useState(0);
+  const [mention, setMention] = useState(null); // {query, start} | null
+  const [highlighted, setHighlighted] = useState(0);
+  const [format, setFormat] = useState("");
   const textareaRef = useRef(null);
-  const dropdownRef = useRef(null);
+  const menuRef = useRef(null);
 
-  const isSendBlocked =
-    disabled ||
-    isSending ||
-    isUploading ||
-    !text.trim() ||
-    Boolean(sendDisabledReason);
+  const isSendBlocked = disabled || isSending || isUploading || !text.trim() || Boolean(sendDisabledReason);
+  const suggestions = mention ? agents.filter((a) => a.name.startsWith(mention.query)) : [];
 
-  // Filter agents list based on what the user typed after @
-  const filteredAgents = mentionQuery !== null
-    ? agents.filter((a) => a.name.startsWith(mentionQuery.toLowerCase()))
-    : [];
+  const submit = async () => {
+    const content = text.trim();
+    if (!content || isSendBlocked) return;
+    const sent = await onSend({ content, fileIds: attachedFiles.map((f) => f.id), format: format || null });
+    if (sent === false) return;
+    setText("");
+    setFormat("");
+    onClearAttachedFiles();
+  };
 
-  // Detect @ mention as the user types
-  const handleChange = useCallback((event) => {
-    const value = event.target.value;
-    setText(value);
+  const handleChange = (event) => {
+    setText(event.target.value);
+    setMention(findMention(event.target.value, event.target.selectionStart));
+    setHighlighted(0);
+  };
 
-    // Find the last @ in the current text before cursor
-    const cursorPos = event.target.selectionStart;
-    const textBeforeCursor = value.slice(0, cursorPos);
-    const atIdx = textBeforeCursor.lastIndexOf("@");
-
-    if (atIdx !== -1) {
-      const query = textBeforeCursor.slice(atIdx + 1);
-      // Only trigger if no space in the query (user is still typing the agent name)
-      if (!query.includes(" ")) {
-        setMentionQuery(query.toLowerCase());
-        setHighlightedIndex(0);
-        return;
-      }
-    }
-    setMentionQuery(null);
-  }, []);
-
-  const selectAgent = useCallback((agent) => {
-    // Strip the @<partial query> fragment from the input
-    setText((prev) => {
-      const atIdx = prev.lastIndexOf("@");
-      return atIdx !== -1 ? prev.slice(0, atIdx) : prev;
+  // Picking an agent INSERTS "@name " into the message (visible, editable). The
+  // backend routes on typed mentions, so the text is the single source of truth.
+  const insertMention = (agent) => {
+    if (!mention) return;
+    const cursor = mention.start + 1 + mention.query.length;
+    const next = `${text.slice(0, mention.start)}@${agent.name} ${text.slice(cursor)}`;
+    setText(next);
+    setMention(null);
+    requestAnimationFrame(() => {
+      const position = mention.start + agent.name.length + 2;
+      textareaRef.current?.focus();
+      textareaRef.current?.setSelectionRange(position, position);
     });
-    onAgentSelect(agent.name);
-    setMentionQuery(null);
-    textareaRef.current?.focus();
-  }, [onAgentSelect]);
+  };
 
-  // Keyboard navigation inside the dropdown
-  const handleKeyDown = useCallback((event) => {
-    if (mentionQuery !== null && filteredAgents.length > 0) {
-      if (event.key === "ArrowDown") {
+  const handleKeyDown = (event) => {
+    if (suggestions.length > 0) {
+      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
         event.preventDefault();
-        setHighlightedIndex((i) => (i + 1) % filteredAgents.length);
+        const step = event.key === "ArrowDown" ? 1 : -1;
+        setHighlighted((i) => (i + step + suggestions.length) % suggestions.length);
         return;
       }
-      if (event.key === "ArrowUp") {
+      if (event.key === "Enter" || event.key === "Tab") {
         event.preventDefault();
-        setHighlightedIndex((i) => (i - 1 + filteredAgents.length) % filteredAgents.length);
-        return;
-      }
-      if (event.key === "Enter") {
-        event.preventDefault();
-        selectAgent(filteredAgents[highlightedIndex]);
+        insertMention(suggestions[highlighted]);
         return;
       }
       if (event.key === "Escape") {
-        setMentionQuery(null);
+        setMention(null);
         return;
       }
     }
-
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
-      void handleSubmit();
+      void submit();
     }
-  }, [mentionQuery, filteredAgents, highlightedIndex, selectAgent]);
-
-  const handleSubmit = async () => {
-    const trimmed = text.trim();
-    if (!trimmed || isSendBlocked) return;
-
-    const wasSent = await onSend({
-      content: trimmed,
-      fileIds: attachedFiles.map((file) => file.id),
-    });
-
-    if (wasSent === false) return;
-
-    setText("");
-    onClearAttachedFiles();
-    // Do NOT reset selectedAgent here — user keeps the chosen agent across messages
   };
 
   const handleFileChange = async (event) => {
-    const incomingFiles = Array.from(event.target.files || []);
+    const files = Array.from(event.target.files || []);
     event.target.value = "";
-    if (incomingFiles.length === 0) return;
-    await onAttachFiles(incomingFiles);
+    if (files.length) await onAttachFiles(files);
   };
 
-  // Close dropdown on click outside
   useEffect(() => {
-    const handleClickOutside = (e) => {
-      if (
-        dropdownRef.current &&
-        !dropdownRef.current.contains(e.target) &&
-        !textareaRef.current?.contains(e.target)
-      ) {
-        setMentionQuery(null);
-      }
+    const close = (e) => {
+      if (!menuRef.current?.contains(e.target) && !textareaRef.current?.contains(e.target)) setMention(null);
     };
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
+    document.addEventListener("mousedown", close);
+    return () => document.removeEventListener("mousedown", close);
   }, []);
 
-  const currentAgentIcon = AGENT_ICONS[selectedAgent] || "🤖";
-  const currentAgentLabel = agents.find((a) => a.name === selectedAgent)?.label || "General Assistant";
+  const inputDisabled = disabled || isSending || isUploading;
 
   return (
     <div className="composer-shell">
-      {/* Active agent badge shown above the input */}
-      {selectedAgent && (
-        <div className="agent-badge-bar">
-          <span className="agent-badge">
-            {currentAgentIcon} {currentAgentLabel}
-          </span>
-          <button
-            className="agent-badge-clear"
-            onClick={() => onAgentSelect(null)}
-            title="Clear agent selection (auto-route)"
-            type="button"
-          >
-            ✕
-          </button>
-        </div>
-      )}
+      <div className="composer-toolbar">
+        <label className="composer-select">
+          <span>Agent</span>
+          <select disabled={disabled} onChange={(e) => onPinAgent(e.target.value || null)} value={pinnedAgent || ""}>
+            <option value="">🧭 Auto (router picks)</option>
+            {agents.map((a) => (
+              <option key={a.name} value={a.name}>{agentIcon(a.name)} {agentLabel(agents, a.name)}</option>
+            ))}
+          </select>
+        </label>
+        <label className="composer-select">
+          <span>Output</span>
+          <select disabled={disabled} onChange={(e) => setFormat(e.target.value)} value={format}>
+            {FILE_FORMATS.map((f) => <option key={f.value} value={f.value}>{f.label}</option>)}
+          </select>
+        </label>
+      </div>
 
-      {/* @ mention dropdown */}
-      {mentionQuery !== null && filteredAgents.length > 0 && (
-        <div className="mention-dropdown" ref={dropdownRef} role="listbox" aria-label="Agent suggestions">
-          {filteredAgents.map((agent, idx) => (
+      {suggestions.length > 0 ? (
+        <div aria-label="Agent suggestions" className="mention-dropdown" ref={menuRef} role="listbox">
+          {suggestions.map((agent, idx) => (
             <button
+              aria-selected={idx === highlighted}
+              className={`mention-option${idx === highlighted ? " mention-option--highlighted" : ""}`}
               key={agent.name}
-              id={`mention-option-${agent.name}`}
-              className={`mention-option${idx === highlightedIndex ? " mention-option--highlighted" : ""}`}
-              onMouseDown={(e) => { e.preventDefault(); selectAgent(agent); }}
-              onMouseEnter={() => setHighlightedIndex(idx)}
+              onMouseDown={(e) => { e.preventDefault(); insertMention(agent); }}
+              onMouseEnter={() => setHighlighted(idx)}
               role="option"
-              aria-selected={idx === highlightedIndex}
               type="button"
             >
-              <span className="mention-option__icon">{AGENT_ICONS[agent.name]}</span>
+              <span className="mention-option__icon">{agentIcon(agent.name)}</span>
               <span className="mention-option__name">@{agent.name}</span>
               <span className="mention-option__desc">{agent.description}</span>
             </button>
           ))}
         </div>
-      )}
+      ) : null}
 
       <div className="composer">
         <div className="composer-main">
@@ -193,15 +163,8 @@ export default function MessageInput({
               {attachedFiles.map((file) => (
                 <div className="composer-file-chip" key={file.id}>
                   <span>{file.filename}</span>
-                  <span className={`composer-file-status composer-file-status--${file.status}`}>
-                    {file.status}
-                  </span>
-                  <button
-                    className="composer-file-remove"
-                    disabled={isSending || isUploading}
-                    onClick={() => onRemoveAttachedFile(file.id)}
-                    type="button"
-                  >
+                  <span className={`composer-file-status composer-file-status--${file.status}`}>{file.status}</span>
+                  <button className="composer-file-remove" disabled={inputDisabled} onClick={() => onRemoveAttachedFile(file.id)} type="button">
                     Remove
                   </button>
                 </div>
@@ -210,44 +173,26 @@ export default function MessageInput({
           ) : null}
 
           <textarea
-            ref={textareaRef}
+            aria-autocomplete="list"
+            aria-label="Chat message input"
             className="composer-input"
-            disabled={disabled || isSending || isUploading}
+            disabled={inputDisabled}
             onChange={handleChange}
             onKeyDown={handleKeyDown}
-            placeholder={
-              disabled
-                ? "Select or create a conversation"
-                : "Type your message... (@ to mention an agent)"
-            }
+            placeholder={disabled ? "Select or create a conversation" : "Message... (@ to mention an agent, drop files anywhere)"}
+            ref={textareaRef}
             rows={2}
             value={text}
-            aria-label="Chat message input"
-            aria-autocomplete="list"
-            aria-controls={mentionQuery !== null ? "mention-dropdown" : undefined}
           />
-          {sendDisabledReason ? (
-            <p className="composer-help-text">{sendDisabledReason}</p>
-          ) : null}
+          {sendDisabledReason ? <p className="composer-help-text">{sendDisabledReason}</p> : null}
           <div className="composer-actions">
             <label className="secondary-button composer-upload-button">
-              <input
-                className="composer-file-input"
-                disabled={disabled || isSending || isUploading}
-                multiple
-                onChange={handleFileChange}
-                type="file"
-              />
+              <input accept={ACCEPT_ATTRIBUTE} className="composer-file-input" disabled={inputDisabled} multiple onChange={handleFileChange} type="file" />
               Add files
             </label>
           </div>
         </div>
-        <button
-          className="primary-button"
-          disabled={isSendBlocked}
-          onClick={() => void handleSubmit()}
-          type="button"
-        >
+        <button className="primary-button" disabled={isSendBlocked} onClick={() => void submit()} type="button">
           {isUploading ? "Uploading..." : isSending ? "Sending..." : "Send"}
         </button>
       </div>
