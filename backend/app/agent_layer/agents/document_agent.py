@@ -8,6 +8,10 @@ from app.agent_layer.schemas import AgentContext
 class DocumentAgent(BaseAgent):
 
     name = "document"
+    label = "Document Agent"
+    description = (
+        "Reading, summarizing and answering questions about documents such as PDF and DOCX files, reports and long text."
+    )
 
     def _build_adk_agent(self) -> LlmAgent:
         return LlmAgent(

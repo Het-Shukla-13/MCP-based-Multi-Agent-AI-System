@@ -35,6 +35,8 @@ class BaseAgent(ABC):
     """
 
     name: str
+    label: str = ""
+    # Shown to the root agent's model by ADK: this text IS the routing criterion.
     description: str = ""
     tools: list[str] = []
 
@@ -92,6 +94,11 @@ class BaseAgent(ABC):
         # context text as session-state placeholders.
         adk_agent.instruction = lambda _ctx, text=compiled_instruction: text
         adk_agent.model = model
+        adk_agent.description = self.description
+        # When used as a sub-agent of the root: answer, don't bounce the request
+        # back to the root or sideways to another agent.
+        adk_agent.disallow_transfer_to_parent = True
+        adk_agent.disallow_transfer_to_peers = True
         return adk_agent
 
 

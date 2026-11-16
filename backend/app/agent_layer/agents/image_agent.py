@@ -8,6 +8,10 @@ from app.agent_layer.schemas import AgentContext
 class ImageAgent(BaseAgent):
 
     name = "image"
+    label = "Image Agent"
+    description = (
+        "Understanding uploaded images (describe, read text, analyse) and creating images or image prompts."
+    )
 
     def _build_adk_agent(self) -> LlmAgent:
         return LlmAgent(

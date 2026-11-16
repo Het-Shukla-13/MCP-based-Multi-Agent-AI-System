@@ -8,6 +8,10 @@ from app.agent_layer.schemas import AgentContext
 class ResearchAgent(BaseAgent):
 
     name = "research"
+    label = "Research Agent"
+    description = (
+        "Research and synthesis: looking up facts, current events, comparisons and structured reports on a topic."
+    )
     tools = [
         "memory_search",
     ]

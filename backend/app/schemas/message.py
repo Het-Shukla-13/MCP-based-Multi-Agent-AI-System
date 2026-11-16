@@ -15,6 +15,7 @@ class MessageCreate(BaseModel):
     content: str
     role: str
     token_count: Optional[int] = None
+    agent_name: Optional[str] = None
     file_ids: List[UUID] = Field(default_factory=list)
 
 class MessageRead(BaseModel):
@@ -24,6 +25,7 @@ class MessageRead(BaseModel):
     content: str
     role: str
     token_count: Optional[int] = None
+    agent_name: Optional[str] = None
     created_at: datetime
     updated_at: datetime
     files: List["FileRead"] = Field(default_factory=list)

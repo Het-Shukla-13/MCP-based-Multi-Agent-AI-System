@@ -8,6 +8,10 @@ from app.agent_layer.schemas import AgentContext
 class DataAgent(BaseAgent):
 
     name = "data"
+    label = "Data Agent"
+    description = (
+        "Analysis of tabular data: CSV/Excel files, statistics, aggregations, trends, charts and pandas/SQL questions."
+    )
 
     def _build_adk_agent(self) -> LlmAgent:
         return LlmAgent(

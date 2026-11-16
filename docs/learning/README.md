@@ -13,6 +13,7 @@ One note per branch, in the order the work was done. Each note covers: the conce
 | 07 | `chore/cleanup` | Direct vs transitive deps, extras, strip_headers bug, stale tests |
 | 08 | `feature/agent-context-wiring` | DB as single source of history, rules vs LLM decisions, relevance thresholds |
 | 09 | `feature/memory-management-api` | Derived data, re-embedding, StrEnum (3.11 change), export formats |
+| 10 | `feature/adk-root-agent` | ADK sub_agents + transfer_to_agent, descriptions as routing, status events, regex lookbehind |
 
 ## Branching workflow
 - `develop-be` is cut from `main`, with the latest feature branch merged in.
