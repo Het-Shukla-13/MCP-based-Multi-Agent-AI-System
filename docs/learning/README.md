@@ -30,6 +30,7 @@ One note per branch, in the order the work was done. Each note covers: the conce
 | 24 | `feature/fe-memory-and-conversations` | Blob downloads, file import, memory UI, accessible drawer |
 | 25 | `feature/refresh-tokens` | Access vs refresh tokens, hashing secrets, rotation, reuse detection |
 | 26 | `feature/fe-session-refresh` | 401 retry interceptor, single-flight refresh, pre-connect refresh |
+| 27 | `feature/fe-ws-reconnect` | Exponential backoff, jitter, resync after reconnect |
 
 ## Branching workflow
 - `develop-be` is cut from `main`, with the latest feature branch merged in.
