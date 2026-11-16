@@ -52,10 +52,10 @@ Now we use `tiktoken` with the `o200k_base` encoding, which is gpt-oss's tokeniz
 The old `.venv` pointed to a Python 3.10 install that no longer exists. Moving the project folder also breaks venvs, because they store absolute paths. It was rebuilt with:
 ```bash
 cd backend
-uv venv --python 3.10 .venv      # uv downloads a standalone Python; system Python is untouched
+uv venv --python 3.12 .venv      # see .python-version; system Python is untouched
 uv pip install --python .venv/bin/python -r requirements.txt
 ```
-We stayed on 3.10 because `requirements.txt` was frozen there. For example, `faiss-cpu==1.7.4` has no 3.12 build.
+Later moved to **3.12** (`chore/python-312`): the only blocker, `faiss-cpu==1.7.4`, was unused and was removed.
 
 ## How to test
 ```bash
