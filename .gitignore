@@ -30,3 +30,4 @@ logs/
 
 backend/test*.py
 backend/inspect*.py
+!docs/learning/*.md

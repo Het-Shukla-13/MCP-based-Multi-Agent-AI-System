@@ -15,11 +15,18 @@ class Settings(BaseSettings):
     DATABASE_URL_ASYNC: str
     DATABASE_URL_SYNC: str
     ENV:str="dev"
-    MODEL: str | None = None
-    CHAT_MODEL: str | None = None
-    MAINTENANCE_MODEL: str | None = None
-    AGENT_MODEL: str = "gemini-3.1-flash-lite"  # Model used by ADK agents (2.0-flash: 1500 RPD free)
-    AGENT_FALLBACK_MODEL: str | None = "groq/llama-3.3-70b-versatile"  # Fallback when primary is quota-exhausted
+    # --- LLM models (free tiers only; verify availability before changing) ---
+    # Non-agent LLM calls (routing, summarization, memory, metadata, file generation).
+    # Names starting with "gemini" go to Google AI Studio; anything else goes to Groq.
+    MODEL: str = "openai/gpt-oss-20b"
+    CHAT_MODEL: str | None = None          # overrides MODEL for foreground calls
+    MAINTENANCE_MODEL: str | None = None   # overrides MODEL for background memory calls
+    LLM_FALLBACK_MODEL: str | None = "gemini-3.5-flash-lite"  # used when the primary is rate-limited/unavailable
+    # gpt-oss is a reasoning model: "low" keeps latency/tokens small for our short tasks.
+    LLM_REASONING_EFFORT: str = "low"
+    # ADK agents (Gemini via google-adk).
+    AGENT_MODEL: str = "gemini-3.1-flash-lite"
+    AGENT_FALLBACK_MODEL: str | None = "gemini-3.5-flash-lite"
     GROQ_API_KEY: str | None = None
     GEMINI_API_KEY: str | None = None
     LLM_TEMPERATURE: float = 0.1

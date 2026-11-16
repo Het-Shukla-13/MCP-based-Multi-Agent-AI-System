@@ -30,10 +30,6 @@ class BaseAgent(ABC):
         # each agent must define its own ADK LlmAgent
         self.adk_agent: LlmAgent = self._build_adk_agent()
 
-        from app.core.config import settings
-        if settings.AGENT_MODEL:
-            self.adk_agent.model = settings.AGENT_MODEL
-
         self.runner = Runner(
             agent=self.adk_agent,
             session_service=self.session_service,
