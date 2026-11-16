@@ -4,6 +4,7 @@ import re
 from time import perf_counter
 
 from google.adk.agents.llm_agent import LlmAgent
+from google.adk.agents.run_config import RunConfig, StreamingMode
 from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
 from google.genai.types import Content, Part
@@ -53,6 +54,25 @@ def collect_generated_files(event: Any, found: list[str]) -> None:
             for file_id in _GENERATED_ID.findall(str(response.response)):
                 if file_id not in found:
                     found.append(file_id)
+
+
+def run_config() -> RunConfig:
+    """SSE streaming: ADK yields partial text events, then one final complete event."""
+    mode = StreamingMode.SSE if settings.STREAMING_ENABLED else StreamingMode.NONE
+    return RunConfig(streaming_mode=mode)
+
+
+def event_text(event: Any) -> str:
+    content = getattr(event, "content", None)
+    return "".join(getattr(p, "text", None) or "" for p in (getattr(content, "parts", None) or []))
+
+
+async def emit_text_delta(on_status: StatusCallback | None, event: Any) -> None:
+    """Forward a streamed text piece. Partial events carry NEW text only."""
+    if getattr(event, "partial", False):
+        text = event_text(event)
+        if text:
+            await emit_status(on_status, {"status": "delta", "agent": event.author, "text": text})
 
 
 async def emit_tool_events(on_status: StatusCallback | None, event: Any) -> None:
@@ -200,16 +220,16 @@ class BaseAgent(ABC):
             user_id=context.user_id,
             session_id=session.id,
             new_message=Content(role="user", parts=[Part.from_text(text=prompt)]),
+            run_config=run_config(),
         ):
             await emit_tool_events(on_status, event)
+            await emit_text_delta(on_status, event)
             if generated_files is not None:
                 collect_generated_files(event, generated_files)
-            # Read text Parts directly; str(event.content) would leak the object repr.
-            content = getattr(event, "content", None)
-            for part in getattr(content, "parts", None) or []:
-                text = getattr(part, "text", None)
-                if text:
-                    final_text += text
+            # Final text from NON-partial events only: in streaming mode the last
+            # event repeats the whole text, so adding partials too would double it.
+            if not getattr(event, "partial", False):
+                final_text += event_text(event)
 
         logger.info(
             "Agent run END | agent=%s | model=%s | duration_s=%s | response_chars=%d",

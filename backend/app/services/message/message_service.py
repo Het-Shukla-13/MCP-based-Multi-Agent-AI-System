@@ -16,9 +16,7 @@ from app.prompts import CHAT_SYSTEM_PROMPT
 from app.services.memory.background_memory_pipeline import (
     schedule_memory_maintenance_pipeline,
 )
-from app.services.user_profile.user_profile_cache_service import (
-    update_profile_snapshot_from_user_message,
-)
+from app.services.user_profile.user_profile_cache_service import schedule_profile_snapshot_update
 from app.agent_layer.agents.root_agent import AgentExecutionError, RootAgent, StatusCallback
 from app.agent_layer.core.mentions import parse_agent_mention
 from app.agent_layer.schemas import AgentContext, HistoryMessage
@@ -210,15 +208,8 @@ async def send_message(
         elapsed_minutes(create_user_started_at),
     )
 
-    profile_update_started_at = perf_counter()
-    await update_profile_snapshot_from_user_message(
-        db,
-        user_message=user_message,
-    )
-    logger.info(
-        "Chat timing | stage=update_profile_snapshot | duration_min={}",
-        elapsed_minutes(profile_update_started_at),
-    )
+    # Profile extraction runs in the background: it doesn't affect this reply.
+    schedule_profile_snapshot_update(user_message)
 
     unified_memory_started_at = perf_counter()
     unified_memory = await build_unified_memory_context(

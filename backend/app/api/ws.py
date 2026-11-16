@@ -75,10 +75,14 @@ async def websocket_endpoint(websocket: WebSocket, conversation_id: UUID, db: As
 
                 # Live progress: "routing" -> "working: code" before the reply arrives.
                 async def push_status(event: dict, _cid=conversation_id) -> None:
-                    await manager.send_to_conversation(
-                        {"type": "agent_status", "data": {"conversation_id": str(_cid), **event}},
-                        _cid,
-                    )
+                    if event.get("status") == "delta":
+                        # Streamed reply text; the final "chat" message still carries the
+                        # complete, saved reply (clients replace the draft with it).
+                        message = {"type": "chat_delta", "data": {
+                            "conversation_id": str(_cid), "agent": event.get("agent"), "text": event.get("text", "")}}
+                    else:
+                        message = {"type": "agent_status", "data": {"conversation_id": str(_cid), **event}}
+                    await manager.send_to_conversation(message, _cid)
 
                 result = await send_message_from_payload(
                     db,

@@ -332,3 +332,22 @@ async def remove_profile_items_by_value(db, *, user_id, value: str) -> int:
             db, user_id=user_id, profile_items=kept, source_memory_count=len(kept)
         )
     return removed
+
+
+_background_tasks: set[asyncio.Task] = set()
+
+
+def schedule_profile_snapshot_update(user_message: Message) -> None:
+    """
+    Run the profile extraction (an LLM call, ~1s) in the background with its own DB
+    session. It used to block every reply even though the reply doesn't need it:
+    the user's message is already in the agent's context.
+    """
+
+    async def _run():
+        async with AsyncSessionLocal() as db:
+            await update_profile_snapshot_from_user_message(db, user_message=user_message)
+
+    task = asyncio.create_task(_run())
+    _background_tasks.add(task)  # keep a reference so the task isn't garbage-collected
+    task.add_done_callback(_background_tasks.discard)
