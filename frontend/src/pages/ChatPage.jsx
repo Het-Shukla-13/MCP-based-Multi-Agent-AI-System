@@ -1,9 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
 import ChatWindow from "../components/ChatWindow";
 import Sidebar from "../components/Sidebar";
+import MemoryPanel from "../components/MemoryPanel";
 import {
   createConversation,
+  deleteConversation,
   errorMessage,
+  exportConversation,
+  importConversation,
+  renameConversation,
   fetchAgents,
   fetchConversations,
   fetchConversationFiles,
@@ -17,6 +22,7 @@ export default function ChatPage({ user, onLogout }) {
   // Pinned agent PER CONVERSATION (it used to be one global localStorage value,
   // so a pick in one chat silently disabled routing in every chat).
   const [pinnedAgentByConversation, setPinnedAgentByConversation] = useState({});
+  const [isMemoryOpen, setIsMemoryOpen] = useState(false);
   const [conversations, setConversations] = useState([]);
   const [selectedConversationId, setSelectedConversationId] = useState("");
   const [messagesByConversation, setMessagesByConversation] = useState({});
@@ -198,6 +204,64 @@ export default function ChatPage({ user, onLogout }) {
       );
     } finally {
       setIsCreatingConversation(false);
+    }
+  };
+
+  const handleRenameConversation = async (conversationId, title) => {
+    try {
+      const updated = await renameConversation(conversationId, title);
+      setConversations((current) => current.map((c) => (c.id === conversationId ? { ...c, title: updated.title } : c)));
+    } catch (error) {
+      setStatusMessage(errorMessage(error, "Could not rename the conversation."));
+    }
+  };
+
+  const handleDeleteConversation = async (conversationId) => {
+    try {
+      await deleteConversation(conversationId);
+      const remaining = conversations.filter((c) => c.id !== conversationId);
+      setConversations(remaining);
+      setMessagesByConversation((current) => {
+        const next = { ...current };
+        delete next[conversationId];
+        return next;
+      });
+      if (conversationId === selectedConversationId) setSelectedConversationId(remaining[0]?.id || "");
+      setStatusMessage("Conversation deleted.");
+    } catch (error) {
+      setStatusMessage(errorMessage(error, "Could not delete the conversation."));
+    }
+  };
+
+  const handleExportConversation = async (conversation) => {
+    try {
+      const data = await exportConversation(conversation.id);
+      // Build the file in the browser and "click" a temporary link to download it.
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const link = Object.assign(document.createElement("a"), {
+        href: url,
+        download: `${conversation.title.replace(/[^\w-]+/g, "_") || "conversation"}.json`,
+      });
+      link.click();
+      URL.revokeObjectURL(url); // free the in-memory file
+    } catch (error) {
+      setStatusMessage(errorMessage(error, "Could not export the conversation."));
+    }
+  };
+
+  const handleImportConversation = async (file) => {
+    try {
+      const payload = JSON.parse(await file.text());
+      const result = await importConversation(payload);
+      const refreshed = await fetchConversations();
+      setConversations(refreshed);
+      setSelectedConversationId(result.conversation_id);
+      setStatusMessage(`Imported ${result.message_count} messages. Memories are being rebuilt in the background.`);
+    } catch (error) {
+      setStatusMessage(
+        error instanceof SyntaxError ? "That file is not valid JSON." : errorMessage(error, "Could not import the conversation.")
+      );
     }
   };
 
@@ -421,6 +485,10 @@ export default function ChatPage({ user, onLogout }) {
         isCreatingConversation={isCreatingConversation}
         onCreateConversation={handleCreateConversation}
         onSelectConversation={setSelectedConversationId}
+        onRenameConversation={handleRenameConversation}
+        onDeleteConversation={handleDeleteConversation}
+        onExportConversation={handleExportConversation}
+        onImportConversation={handleImportConversation}
         selectedConversationId={selectedConversationId}
       />
 
@@ -430,9 +498,10 @@ export default function ChatPage({ user, onLogout }) {
             <p className="workspace-header__label">Current Chat</p>
             <h2>{selectedConversation?.title || "No conversation selected"}</h2>
           </div>
-          <span className={`status-pill status-pill--${connectionState}`}>
-            {connectionState}
-          </span>
+          <div className="workspace-header__actions">
+            <button className="secondary-button" onClick={() => setIsMemoryOpen(true)} type="button">🧠 Memory</button>
+            <span className={`status-pill status-pill--${connectionState}`}>{connectionState}</span>
+          </div>
         </header>
 
         <div className="status-banner">{statusMessage}</div>
@@ -456,6 +525,7 @@ export default function ChatPage({ user, onLogout }) {
           sendDisabledReason={sendDisabledReason}
         />
       </main>
+      {isMemoryOpen ? <MemoryPanel onClose={() => setIsMemoryOpen(false)} /> : null}
     </div>
   );
 }

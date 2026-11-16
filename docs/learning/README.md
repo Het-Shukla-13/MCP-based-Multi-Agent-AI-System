@@ -26,6 +26,8 @@ One note per branch, in the order the work was done. Each note covers: the conce
 | 20 | `feature/fe-markdown` | Safe Markdown rendering, no raw HTML, tokenised file URLs, memo |
 | 21 | `fix/adk-context-leak` | Inspecting model input, ADK before_model_callback |
 | 22 | `feature/fe-composer` | Mention parsing, per-conversation state, drag-and-drop, client vs server validation |
+| 23 | `fix/profile-stale-items` | Rebuild caches from the source of truth |
+| 24 | `feature/fe-memory-and-conversations` | Blob downloads, file import, memory UI, accessible drawer |
 
 ## Branching workflow
 - `develop-be` is cut from `main`, with the latest feature branch merged in.

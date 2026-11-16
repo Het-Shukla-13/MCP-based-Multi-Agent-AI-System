@@ -99,3 +99,45 @@ export function withToken(path) {
 
 export const generatedFileUrl = (fileId, kind = "preview") =>
   withToken(`/files/generated/${fileId}/${kind}`);
+
+// ---- export / import ----
+export async function exportConversation(conversationId) {
+  return (await api.get(`/conversations/${conversationId}/export`)).data;
+}
+
+export async function importConversation(payload) {
+  return (await api.post("/conversations/import", payload)).data;
+}
+
+// ---- memories (always the signed-in user's) ----
+export async function listMemories({ includeInactive = false } = {}) {
+  return (await api.get("/memories", { params: { include_inactive: includeInactive } })).data;
+}
+
+export async function searchMemories(query) {
+  return (await api.get("/memories/search", { params: { query, top_k: 10 } })).data;
+}
+
+export async function createMemory(content, memoryType) {
+  return (await api.post("/memories", { content, memory_type: memoryType })).data;
+}
+
+export async function updateMemory(memoryId, changes) {
+  return (await api.patch(`/memories/${memoryId}`, changes)).data;
+}
+
+export async function removeMemory(memoryId, { hard = false } = {}) {
+  await api.delete(`/memories/${memoryId}`, { params: { hard } });
+}
+
+export async function fetchProfile() {
+  return (await api.get("/memories/profile")).data;
+}
+
+export async function rebuildProfile() {
+  return (await api.post("/memories/profile/rebuild")).data;
+}
+
+export async function removeProfileItem(value) {
+  return (await api.delete("/memories/profile/items", { params: { value } })).data;
+}
