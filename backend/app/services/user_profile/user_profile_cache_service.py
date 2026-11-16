@@ -281,33 +281,26 @@ def schedule_user_profile_refresh(
     )
 
 
-def _drop_items_from_missing_memories(profile_items: list[dict], active_memory_ids: set[str]) -> list[dict]:
-    """Keep message-derived items; keep memory-derived items only if their memory is still active."""
-    kept = []
-    for item in profile_items:
-        memory_id = (item.get("metadata") or {}).get("memory_id")
-        if memory_id and memory_id not in active_memory_ids:
-            continue
-        kept.append(item)
-    return kept
+def _message_derived_items(profile_items: list[dict]) -> list[dict]:
+    """
+    Keep only items extracted directly from messages (no memory behind them).
+    Memory-derived items are ALWAYS recomputed from the current memories: keeping
+    them meant an edited memory left its old wording in the profile next to the new.
+    """
+    return [item for item in profile_items if not (item.get("metadata") or {}).get("memory_id")]
 
 
 async def rebuild_user_profile_cache(db, *, user_id):
     """
     Recompute the profile after memories were edited or deleted.
 
-    refresh_user_profile_cache() only MERGES new data into the cached items, so a
-    deleted memory would stay in the profile forever. Here we first drop items whose
-    source memory no longer exists or is inactive, then merge the active memories.
+    refresh_user_profile_cache() only MERGES new data into the cached items, so deleted
+    or edited memories would leave stale items behind. Here memory-derived items are
+    rebuilt from scratch from the active memories; message-derived items are kept.
     """
     snapshot = await get_user_profile_snapshot(db, user_id=user_id)
     active_memories = await get_memories_by_user(db, user_id=user_id, only_active=True)
-    active_ids = {str(memory.id) for memory in active_memories}
-
-    existing_items = _drop_items_from_missing_memories(
-        list(getattr(snapshot, "profile_items", []) or []),
-        active_ids,
-    )
+    existing_items = _message_derived_items(list(getattr(snapshot, "profile_items", []) or []))
     merged_items = merge_profile_items_from_memories(existing_items, active_memories)
     profile_relevant_count = sum(
         1 for memory in active_memories if getattr(memory, "memory_type", None) in PROFILE_RELEVANT_TYPES
