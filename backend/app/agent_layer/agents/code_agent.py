@@ -1,3 +1,4 @@
+from app.core.config import settings
 from google.adk.agents.llm_agent import LlmAgent
 
 from app.agent_layer.core.base import BaseAgent
@@ -11,7 +12,7 @@ class CodeAgent(BaseAgent):
     def _build_adk_agent(self) -> LlmAgent:
         return LlmAgent(
             name="code",
-            model="gemini-3.1-flash-lite",
+            model=settings.AGENT_MODEL,
             instruction="""
 You are an expert Software Engineer and Coding Assistant.
 
