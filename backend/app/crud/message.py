@@ -1,16 +1,139 @@
-from app.models import Message
-from sqlmodel import Session, select
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlmodel import select
+from fastapi import HTTPException
+from sqlalchemy.orm import selectinload
+from app.models import User, Conversation, Message, File
+from uuid import UUID
 
-def create_message(user_id: int, session: Session):
-    conversation=Conversation(
-        user_id=user_id,
-        title=title
+from app.schemas import MessageCreate
+
+async def _load_user_and_conversation(
+    session: AsyncSession,
+    payload: MessageCreate,
+):
+    user = await session.execute(select(User).where(User.id == payload.user_id))
+    user = user.scalar_one_or_none()
+    if not user:
+        raise HTTPException(404, "User not found")
+
+    conversation = await session.execute(
+        select(Conversation).where(Conversation.id == payload.conversation_id)
     )
-    session.add(conversation)
-    session.commit()
-    session.refresh(conversation)
-    return conversation
+    conversation = conversation.scalar_one_or_none()
+    if not conversation:
+        raise HTTPException(404, "Conversation not found")
+    if conversation.user_id != payload.user_id:
+        raise HTTPException(status_code=403, detail="Conversation does not belong to this user")
 
-def get_conversation(conversation_id: int, role: str, content: str, token_count:int, session: Session):
-    conversation=session.exec(selct(Conversation).where(Conversation.id==conversation_id)).first()
-    return conversation
+    return user, conversation
+
+async def _attach_files_to_message(
+    session: AsyncSession,
+    payload: MessageCreate,
+    message: Message,
+):
+    if not payload.file_ids:
+        return
+
+    files = await session.execute(select(File).where(File.id.in_(payload.file_ids)))
+    files = files.scalars().all()
+    if len(files) != len(payload.file_ids):
+        raise HTTPException(status_code=404, detail="Some files not found")
+
+    for file in files:
+        if file.conversation_id != payload.conversation_id:
+            raise HTTPException(status_code=400, detail="File does not belong to this conversation")
+        if file.user_id != payload.user_id:
+            raise HTTPException(status_code=403, detail="File does not belong to this user")
+        file.message_id = message.id
+
+async def create_message(session: AsyncSession, payload: MessageCreate):
+    user, conversation = await _load_user_and_conversation(session, payload)
+    message=Message(**payload.dict())
+    message.user=user
+    message.conversation=conversation
+    
+    session.add(message)
+    await session.flush()
+    
+    await _attach_files_to_message(session, payload, message)
+
+    session.add(message)
+    await session.commit()
+
+    result = await session.execute(
+        select(Message)
+        .where(Message.id == message.id)
+        .options(
+            selectinload(Message.files),
+            selectinload(Message.user),
+            selectinload(Message.conversation),
+        )
+    )
+    message = result.scalar_one()
+    return message
+
+async def get_message(db: AsyncSession, message_id: UUID) -> Message:
+    message = await db.execute(select(Message).where(Message.id == message_id).options(selectinload(Message.files), selectinload(Message.user), selectinload(Message.conversation)))
+    message = message.scalar_one_or_none()
+    if not message:
+        raise HTTPException(status_code=404, detail="Message not found")
+    return message
+
+async def get_messages(db: AsyncSession, conversation_id: UUID | None = None) -> list[Message]:
+    query = select(Message).options(
+        selectinload(Message.files),
+        selectinload(Message.user),
+        selectinload(Message.conversation),
+    )
+    if conversation_id:
+        query = query.where(Message.conversation_id == conversation_id)
+    result = await db.execute(query)
+    messages = result.scalars().all()
+    return messages
+
+async def update_message(db: AsyncSession, message_id: UUID, content: str | None = None, file_ids: list[UUID] | None = None) -> Message:
+    message = await get_message(db, message_id)
+    
+    if content is not None:
+        message.content = content
+
+    if file_ids is not None:
+        result = await db.execute(select(File).where(File.message_id == message.id))
+        existing_files = result.scalars().all()
+        for file in existing_files:
+            file.message_id = None
+        result = await db.execute(select(File).where(File.id.in_(file_ids)))
+        new_files = result.scalars().all()
+
+        if len(new_files) != len(file_ids):
+            raise HTTPException(status_code=404, detail="Some files not found")
+
+        for file in new_files:
+            file.message_id = message.id
+
+    await db.commit()
+
+    result = await db.execute(
+        select(Message)
+        .where(Message.id == message.id)
+        .options(
+            selectinload(Message.files),
+            selectinload(Message.user),
+            selectinload(Message.conversation),
+        )
+    )
+
+    message = result.scalar_one()
+    return message
+
+async def delete_message(db: AsyncSession, message_id: UUID) -> None:
+    message = await get_message(db, message_id)
+    result = await db.execute(
+        select(File).where(File.message_id == message.id)
+    )
+    files = result.scalars().all()
+    for file in files:
+        file.message_id = None # detaching files, delete it later
+    await db.delete(message)
+    await db.commit()

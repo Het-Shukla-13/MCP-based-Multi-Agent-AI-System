@@ -1,38 +1,56 @@
-fastapi[standard]
-uvicorn
-python-jose[cryptography]
-passlib[bcrypt]==1.7.4
-bcrypt==4.0.1
-sqlmodel
-pydantic
-python-dotenv
-asyncpg
-psycopg2-binary
-fastapi-pagination
-pytest
-pytest-asyncio
-httpx
-langchain
-langchain-community
-langchain-openai
-openai
-langchain-groq
-groq
-chromadb
-sqlalchemy
-pypdf
-transformers<5.0.0
-huggingface-hub<1.0.0
-sentence-transformers
-langchain-huggingface
-python-multipart
-requests
-langgraph
-tiktoken
-faiss-cpu==1.7.4
+# Direct runtime dependencies only (transitive packages are resolved by the installer).
+# Install: uv pip install -r requirements.txt   (Python 3.12, see .python-version)
+
+# --- Web / API ---
+fastapi==0.135.3
+uvicorn[standard]==0.44.0
+python-multipart==0.0.24      # multipart/form-data uploads
+email-validator==2.3.0        # pydantic EmailStr
+
+# --- Database ---
+sqlmodel==0.0.38
+sqlalchemy[asyncio]==2.0.49    # [asyncio] pulls in greenlet, required at runtime by async sessions
+asyncpg==0.31.0               # async driver (app)
+psycopg2-binary==2.9.11       # sync driver (alembic, file ingestion)
+alembic==1.18.4
+pgvector==0.4.2
+
+# --- Auth ---
+argon2-cffi==25.1.0          # Argon2id password hashing
+PyJWT==2.15.1                 # signed access tokens
+
+# --- Config / logging ---
+pydantic==2.12.5
+pydantic-settings==2.13.1
+python-dotenv==1.2.2
+loguru==0.7.3
+
+# --- Background jobs ---
+celery[redis]==5.6.3
+
+# --- LLM providers / agents (free tiers) ---
+openai==2.30.0                # OpenAI-compatible client, used for Gemini's endpoint
+groq==0.37.1
+google-adk[mcp]==2.2.0      # [mcp] pins a compatible mcp SDK (mcp>=1.24,<2)
+google-genai==2.8.0           # Gemini embeddings + vision (direct SDK)
+tiktoken==0.12.0              # token counting (no local model)
+
+# --- File parsing / chunking ---
 numpy==1.26.4
-alembic
-pydantic-settings
-websockets
-loguru
-greenlet
+pandas==2.3.3
+openpyxl==3.1.5               # .xlsx
+python-docx==1.2.0
+pymupdf==1.27.2.2
+pymupdf4llm==1.27.2.2
+pymupdf-layout==1.27.2.2
+langchain-text-splitters==1.1.1
+tree-sitter==0.25.2
+tree-sitter-language-pack==1.25.2
+
+
+# --- MCP tool servers ---
+httpx==0.28.1                 # web fetch, image generation download
+ddgs==9.16.1                   # free web search (metasearch, no API key)
+beautifulsoup4==4.15.0         # web page text extraction
+markdown==3.11.3               # Markdown -> HTML -> PDF (artifacts)
+tabulate==0.10.0               # DataFrame.to_markdown (data tools)

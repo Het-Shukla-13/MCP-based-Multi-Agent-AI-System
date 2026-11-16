@@ -1,40 +1,71 @@
-import { useEffect, useRef, useState } from "react";
-import { connectWebSocket, sendMessage } from "../services/websocket";
-import MessageBubble from "./MessageBubble";
-import ChatInput from "./ChatInput";
+import MessageList from "./MessageList";
+import MessageInput from "./MessageInput";
 
-function ChatWindow() {
-  const [messages, setMessages] = useState([]);
-  const hasConnected = useRef(false);
+const AGENT_ICONS = {
+  general:  "🤖",
+  code:     "💻",
+  data:     "📊",
+  research: "🔍",
+  document: "📄",
+  image:    "🖼️",
+};
 
-  useEffect(() => {
-    if (hasConnected.current) return;
-    hasConnected.current = true;
-
-    connectWebSocket(1, (msg) => {
-      setMessages((prev) => [...prev, { role: "assistant", content: msg }]);
-    });
-  }, []);
-
-  const handleSend = (text) => {
-    setMessages((prev) => [...prev, { role: "user", content: text }]);
-    sendMessage(text);
-  };
+export default function ChatWindow({
+  activeAgent,
+  agents,
+  agentSwitched,
+  attachedFiles,
+  conversation,
+  isLoading,
+  isSending,
+  isUploading,
+  messages,
+  onAttachFiles,
+  onClearAttachedFiles,
+  onRemoveAttachedFile,
+  onSend,
+  sendDisabledReason,
+  selectedAgent,
+  onAgentSelect,
+}) {
+  const agentLabel = agents.find((a) => a.name === activeAgent)?.label || "General Assistant";
+  const agentIcon  = AGENT_ICONS[activeAgent] || "🤖";
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
-      <div style={{ flex: 1, overflowY: "auto", padding: "20px" }}>
-        {messages.map((msg, index) => (
-          <MessageBubble
-            key={index}
-            role={msg.role}
-            content={msg.content}
-          />
-        ))}
-      </div>
-      <ChatInput onSend={handleSend} />
-    </div>
+    <section className="chat-window">
+      {/* Active agent header bar */}
+      {conversation && (
+        <div className="active-agent-bar">
+          <span className="active-agent-indicator">
+            <span className="active-agent-dot" />
+            {agentIcon} {agentLabel}
+          </span>
+        </div>
+      )}
+
+      <MessageList
+        activeAgent={activeAgent}
+        agentSwitched={agentSwitched}
+        agents={agents}
+        conversation={conversation}
+        isLoading={isLoading}
+        isSending={isSending}
+        messages={messages}
+      />
+      <MessageInput
+        agents={agents}
+        attachedFiles={attachedFiles}
+        disabled={!conversation}
+        isSending={isSending}
+        isUploading={isUploading}
+        onAttachFiles={onAttachFiles}
+        onClearAttachedFiles={onClearAttachedFiles}
+        onRemoveAttachedFile={onRemoveAttachedFile}
+        onSend={onSend}
+        sendDisabledReason={sendDisabledReason}
+        selectedAgent={selectedAgent}
+        onAgentSelect={onAgentSelect}
+      />
+    </section>
   );
 }
-
-export default ChatWindow;

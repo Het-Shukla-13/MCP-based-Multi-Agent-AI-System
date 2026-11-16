@@ -1,42 +1,29 @@
-from fastapi import APIRouter, Depends, HTTPException
-from sqlmodel import Session
-from app.schemas.chat import ChatRequest, ChatResponse
-from app.services.llm_service import llm_service
-from app.core.database import get_session
-from datetime import datetime
+from uuid import UUID
 
-router = APIRouter()
+from fastapi import APIRouter, Depends
+from pydantic import BaseModel, Field
+from sqlmodel.ext.asyncio.session import AsyncSession
 
-@router.post("/chat", response_model=ChatResponse)
-async def chat(request: ChatRequest, session: Session = Depends(get_session)):
-    user=get_user(request.user_id, session)
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+from app.api.deps import get_current_user, owned_conversation
+from app.db.database import get_db
+from app.models import User
+from app.services.message.message_service import send_message_from_payload
 
-    if not request.conversation_id:
-        conversation = create_conversation(user_id=request.user_id, session=session)
-    else:
-        conversation = get_conversation(request.conversation_id, session)
-        if not conversation:
-            raise HTTPException(status_code=404, detail="Conversation not found")
+router = APIRouter(prefix="/chat", tags=["Chat"])
 
-    user_message = create_message(
-        conversation_id=conversation.id,
-        role="user",
-        content=request.message,
-        token_count=len(request.message.split())
-    )
 
-    reply = await llm_service.generate(request.message)
+class ChatSendRequest(BaseModel):
+    conversation_id: UUID
+    content: str = Field(min_length=1, max_length=20_000)
+    file_ids: list[UUID] = Field(default_factory=list)
+    selected_agent: str | None = None
+    format: str | None = None
 
-    assistant_message = create_message(
-        conversation_id=conversation.id,
-        role="assistant",
-        content=reply,
-        token_count=len(reply.split())
-    )
 
-    return ChatResponse(
-        conversation_id=conversation.id,
-        reply=reply
+@router.post("/send")
+async def chat(payload: ChatSendRequest, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    """Non-streaming alternative to the WebSocket (same pipeline)."""
+    await owned_conversation(db, payload.conversation_id, user)
+    return await send_message_from_payload(
+        db, payload.conversation_id, payload.model_dump(mode="json"), user.id
     )

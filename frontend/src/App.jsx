@@ -1,27 +1,36 @@
 import { useEffect, useState } from "react";
-import { checkHealth } from "./services/api";
-import Sidebar from "./components/Sidebar";
-import ChatWindow from "./components/ChatWindow";
+import ChatPage from "./pages/ChatPage.jsx";
+import AgentSwitcher from "./components/AgentSwitcher.jsx";
 
 function App() {
-  const [backendStatus, setBackendStatus] = useState("Checking...");
+  const [selectedAgent, setSelectedAgent] = useState(null);
+  const [activeAgent, setActiveAgent] = useState("general");
 
+  // Load persisted agent selection
   useEffect(() => {
-    checkHealth()
-      .then((data) => setBackendStatus(data.status))
-      .catch(() => setBackendStatus("Backend not reachable"));
+    const saved = localStorage.getItem("selectedAgent");
+    if (saved) setSelectedAgent(saved);
   }, []);
 
+  // Persist when it changes
+  useEffect(() => {
+    if (selectedAgent) {
+      localStorage.setItem("selectedAgent", selectedAgent);
+    } else {
+      localStorage.removeItem("selectedAgent");
+    }
+  }, [selectedAgent]);
+
   return (
-    <div style={{ display: "flex", height: "100vh" }}>
-      <Sidebar />
-      <div style={{ flex: 1 }}>
-        <div style={{ padding: "10px", borderBottom: "1px solid #ddd" }}>
-          Backend Status: {backendStatus}
-        </div>
-        <ChatWindow />
-      </div>
-    </div>
+    <>
+      <AgentSwitcher activeAgent={activeAgent} />
+      <ChatPage
+        selectedAgent={selectedAgent}
+        setSelectedAgent={setSelectedAgent}
+        activeAgent={activeAgent}
+        setActiveAgent={setActiveAgent}
+      />
+    </>
   );
 }
 

@@ -1,14 +1,135 @@
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+import json
+import logging
+from time import perf_counter
+from app.agent_layer.core import agent_registry
+from app.services.message.message_service import send_message_from_payload
+from app.schemas.message import MessageRead
+from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
+from sqlmodel import select
+from uuid import UUID
+from app.db.database import get_db
+from app.models import Conversation
+from app.core.security import decode_access_token
 from app.core.websocket import manager
+from app.services.time.timing import elapsed_minutes
+from sqlalchemy.ext.asyncio.session import AsyncSession
+from fastapi.encoders import jsonable_encoder
 
-router = APIRouter()
+logger = logging.getLogger(__name__)
 
-@router.websocket("/ws/{user_id}")
-async def websocket_endpoint(websocket: WebSocket, user_id: int):
-    await manager.connect(user_id, websocket)
+
+router = APIRouter(
+    prefix="/ws",
+    tags=["WebSockets"],
+)
+
+
+@router.get("/agents")
+async def list_agents():
+    """Agents straight from the registry: the same descriptions the root agent routes on."""
+    return {
+        "agents": [
+            {"name": agent.name, "label": agent.label, "description": agent.description}
+            for agent in agent_registry.get_all().values()
+        ]
+    }
+
+
+@router.websocket("/{conversation_id}")
+async def websocket_endpoint(websocket: WebSocket, conversation_id: UUID, db: AsyncSession = Depends(get_db)):
+    # Browsers can't set headers on a WebSocket, so the access token comes as
+    # ?token=. The user id is DERIVED from it; a client-supplied user_id is ignored.
+    authenticated_user_id = decode_access_token(websocket.query_params.get("token") or "")
+    if authenticated_user_id is None:
+        await websocket.close(code=1008)  # 1008 = policy violation
+        return
+
+    result = await db.execute(
+        select(Conversation).where(
+            Conversation.id == conversation_id,
+            Conversation.user_id == authenticated_user_id,
+        )
+    )
+    conversation = result.scalar_one_or_none()
+    if not conversation:
+        await websocket.close(code=1008)
+        return
+
+    await manager.connect(conversation_id, websocket)
+
     try:
         while True:
+            receive_started_at = perf_counter()
             data = await websocket.receive_text()
-            await manager.send_personal_message(f"Echo: {data}", user_id)
+            logger.info(
+                "WebSocket timing | stage=receive_text | conversation_id=%s | duration_min=%.4f",
+                conversation_id,
+                elapsed_minutes(receive_started_at),
+            )
+            try:
+                payload = json.loads(data)
+                process_started_at = perf_counter()
+
+                # Live progress: "routing" -> "working: code" before the reply arrives.
+                async def push_status(event: dict, _cid=conversation_id) -> None:
+                    if event.get("status") == "delta":
+                        # Streamed reply text; the final "chat" message still carries the
+                        # complete, saved reply (clients replace the draft with it).
+                        message = {"type": "chat_delta", "data": {
+                            "conversation_id": str(_cid), "agent": event.get("agent"), "text": event.get("text", "")}}
+                    else:
+                        message = {"type": "agent_status", "data": {"conversation_id": str(_cid), **event}}
+                    await manager.send_to_conversation(message, _cid)
+
+                result = await send_message_from_payload(
+                    db,
+                    conversation_id,
+                    payload,
+                    authenticated_user_id,
+                    on_status=push_status,
+                )
+                logger.info(
+                    "WebSocket timing | stage=process_message | conversation_id=%s | duration_min=%.4f",
+                    conversation_id,
+                    elapsed_minutes(process_started_at),
+                )
+
+                send_started_at = perf_counter()
+                await manager.send_to_conversation(
+                    jsonable_encoder({
+                        "type": "chat",
+                        "data": {
+                            "conversation_id": str(conversation_id),
+                            "user_message": MessageRead.model_validate(
+                                result["user_message"]
+                            ).model_dump(),
+                            "ai_message": MessageRead.model_validate(
+                                result["ai_message"]
+                            ).model_dump(),
+                            "active_agent": result.get("active_agent", "general"),
+                            "agent_switched": result.get("agent_switched", False),
+                            "error": result.get("error", False),
+                        }
+                    }),
+                    conversation_id
+                )
+                logger.info(
+                    "WebSocket timing | stage=send_to_conversation | conversation_id=%s | duration_min=%.4f",
+                    conversation_id,
+                    elapsed_minutes(send_started_at),
+                )
+            except Exception:
+                logger.exception(
+                    "WebSocket message handling failed for conversation %s",
+                    conversation_id,
+                )
+                await websocket.send_json(
+                    {
+                        "type": "error",
+                        "detail": "Failed to process the message.",
+                    }
+                )
+
     except WebSocketDisconnect:
-        manager.disconnect(user_id, websocket)
+        manager.disconnect(conversation_id, websocket)
+
