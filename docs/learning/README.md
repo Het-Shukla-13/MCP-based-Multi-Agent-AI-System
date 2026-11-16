@@ -32,6 +32,7 @@ One note per branch, in the order the work was done. Each note covers: the conce
 | 26 | `feature/fe-session-refresh` | 401 retry interceptor, single-flight refresh, pre-connect refresh |
 | 27 | `feature/fe-ws-reconnect` | Exponential backoff, jitter, resync after reconnect |
 | 28 | `feature/fe-responsive` | Off-canvas drawer, dvh, hover media query, CSS cascade order |
+| 29 | `fix/fe-stale-responses` | Out-of-order responses, latest-request guard |
 
 ## Branching workflow
 - `develop-be` is cut from `main`, with the latest feature branch merged in.
