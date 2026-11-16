@@ -13,12 +13,18 @@ from app.models.user import User
 from app.models.conversation import Conversation
 from app.models.message import Message
 from app.schemas.file import FileRead
-from app.services.file_processing.file_type_config import ALLOWED_FILE_EXTENSIONS
+from app.services.file_processing.file_type_config import ALLOWED_FILE_EXTENSIONS, MAX_UPLOAD_BYTES, MIME_BY_EXTENSION
+from app.services.file_processing.file_validation import sniff_matches_extension
 
 
-def _write_file_content(file_path: str, content: bytes) -> None:
-    with open(file_path, "wb") as f:
-        f.write(content)
+UPLOAD_READ_CHUNK_BYTES = 1024 * 1024  # read uploads 1 MB at a time
+
+
+def _remove_quietly(path: str) -> None:
+    try:
+        os.remove(path)
+    except FileNotFoundError:
+        pass
 
 async def create_file(db: AsyncSession, payload) -> File:
     user = (await db.execute(select(User).where(User.id == payload.user_id))).scalar_one_or_none()
@@ -118,8 +124,34 @@ async def validate_and_save_file_to_storage(file: UploadFile, base_path: str = "
         raise HTTPException(status_code=400, detail=f"File type not allowed: {file.filename}")
     unique_name = f"{str(uuid.uuid4())}_{original_filename}"
     file_path = os.path.join(base_path, unique_name)
-    content = await file.read()
-    if len(content) > 7 * 1024 * 1024:
-        raise HTTPException(status_code=400, detail=f"File too large: {file.filename}. File size should not exceed 7 MB.")
-    await anyio.to_thread.run_sync(_write_file_content, file_path, content)
-    return file_path, len(content)
+
+    # Stream to disk in chunks and stop as soon as the limit is crossed, instead of
+    # loading the whole upload into memory first (a 2 GB upload would have been read
+    # fully before being rejected).
+    size = 0
+    head = b""
+    try:
+        with open(file_path, "wb") as out:
+            while chunk := await file.read(UPLOAD_READ_CHUNK_BYTES):
+                size += len(chunk)
+                if size > MAX_UPLOAD_BYTES:
+                    raise HTTPException(
+                        status_code=413,
+                        detail=f"File too large: {original_filename}. File size should not exceed 7 MB.",
+                    )
+                if len(head) < 8192:
+                    head += chunk[: 8192 - len(head)]
+                await anyio.to_thread.run_sync(out.write, chunk)
+
+        if size == 0:
+            raise HTTPException(status_code=400, detail=f"Empty file: {original_filename}")
+
+        # Verify the bytes really are what the extension claims (a renamed .exe is not a .pdf).
+        ok, reason = await anyio.to_thread.run_sync(sniff_matches_extension, file_path, ext, head)
+        if not ok:
+            raise HTTPException(status_code=400, detail=f"{original_filename}: {reason}")
+    except BaseException:
+        _remove_quietly(file_path)  # never leave partial or rejected files on disk
+        raise
+
+    return file_path, size, MIME_BY_EXTENSION.get(ext, "application/octet-stream")

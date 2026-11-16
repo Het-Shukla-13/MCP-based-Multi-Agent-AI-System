@@ -1,7 +1,8 @@
 import re
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_text_splitters import MarkdownHeaderTextSplitter
-from tree_sitter_languages import get_language, get_parser
+from loguru import logger
+from tree_sitter_language_pack import get_parser
 from typing import List, Dict
 import os
 import pandas as pd
@@ -96,24 +97,24 @@ def get_language_from_filename(filename: str):
     lang_name = EXTENSION_LANGUAGE_MAP.get(ext)
     if not lang_name:
         return None
-    return get_language(lang_name), get_parser(lang_name)
+    return get_parser(lang_name)
 
 
 def chunk_code_ast(code: str, filename: str) -> List[Dict]:
     """
     AST-based chunking using Tree-sitter
     """
-    print("AST STEP 1: getting language")
-    lang = get_language_from_filename(filename)
-    if not lang:
-        print("AST STEP 2: fallback")
+    try:
+        parser = get_language_from_filename(filename)
+        if parser is None:
+            return fallback_chunk(code, filename)
+        tree = parser.parse(bytes(code, "utf-8"))
+    except Exception:
+        # A parser problem must degrade to plain chunking, not fail the whole file.
+        logger.exception("Tree-sitter parsing failed for {}; using fallback chunking", filename)
         return fallback_chunk(code, filename)
-
-    _, parser = lang
-    print("AST STEP 3: parsing started")
-    tree = parser.parse(bytes(code, "utf-8"))
-    print("AST STEP 4: parsing finished")
     root = tree.root_node
+    code_bytes = code.encode("utf-8")
 
     chunks = []
 
@@ -132,12 +133,13 @@ def chunk_code_ast(code: str, filename: str) -> List[Dict]:
             "variable_declaration",
             "public_field_definition",
         }
-        print(f"Traversing node: {node.type}")
         if node.type in important_types:
             start_byte = node.start_byte
             end_byte = node.end_byte
 
-            chunk_text = code[start_byte:end_byte]
+            # Slice the BYTES: tree-sitter offsets are byte offsets, which differ from
+            # str indices as soon as the file contains non-ASCII characters.
+            chunk_text = code_bytes[start_byte:end_byte].decode("utf-8", errors="replace")
 
             chunks.append({
                 "content": chunk_text,
@@ -153,11 +155,8 @@ def chunk_code_ast(code: str, filename: str) -> List[Dict]:
             traverse(child, depth + 1)
 
     traverse(root)
-    print("Traversal done")
     if not chunks:
-        print("Calling Fallback")
         return fallback_chunk(code, filename)
-    print("Returning chunks")
     return chunks
 
 def fallback_chunk(code: str, filename: str, chunk_size=1000, overlap=100):
