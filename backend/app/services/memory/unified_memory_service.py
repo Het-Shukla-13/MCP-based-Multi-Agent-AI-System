@@ -7,10 +7,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.crud.conversation import get_conversation
 from app.models.message import Message
 from app.services.conversation.history_service import fetch_conversation_history
-from app.services.memory.context_router import (
-    ContextPolicy,
-    route_context_policy,
-)
+from app.core.config import settings
+from app.services.memory.context_router import ContextPolicy, build_context_policy
 from app.services.memory.ltm_service import search_memories_with_scores
 from app.services.user_profile.user_profile_cache_service import get_cached_user_profile_text
 from app.services.memory.memory_services import build_smart_history, get_stm_state
@@ -185,11 +183,7 @@ async def build_unified_memory_context(
     )
 
     routing_started_at = perf_counter()
-    context_policy = await route_context_policy(
-        query_text=query_text,
-        recent_messages=raw_messages,
-        has_rag_context=bool((rag_context or "").strip()),
-    )
+    context_policy = build_context_policy(has_rag_context=bool((rag_context or "").strip()))
     logger.info(
         "Unified memory policy | recent={} | stm={} | files={} | profile={} | ltm={} | related={} | metadata={} | self_contained={} | topic_shift={} | temporary_modes={} | confidence={} | reason={}",
         context_policy.needs_recent_history,
@@ -237,10 +231,12 @@ async def build_unified_memory_context(
         "Unified memory timing | stage=search_ltm_memories | duration_min={}",
         elapsed_minutes(ltm_search_started_at),
     )
+    # Relevance filter: always searched, but only close-enough memories are used.
     ltm_results = [
         item
         for item in all_ltm_results
         if item["memory"].memory_type != "conversation_summary"
+        and item["distance"] <= settings.MEMORY_MAX_DISTANCE
     ][:ltm_top_k]
 
     related_search_started_at = perf_counter()
@@ -254,6 +250,11 @@ async def build_unified_memory_context(
             conversation_id=None,
             only_active=True,
         )
+        related_conversation_results = [
+            item
+            for item in related_conversation_results
+            if item["distance"] <= settings.RELATED_CONVERSATION_MAX_DISTANCE
+        ]
     else:
         related_conversation_results = []
     logger.info(
@@ -320,7 +321,8 @@ async def build_unified_memory_context(
     )
 
     stm_summary_started_at = perf_counter()
-    stm_summary = get_stm_state(conversation.convo_metadata).get("rolling_summary", "")
+    # Use the state we just computed (the stored metadata is one turn behind).
+    stm_summary = stm_state.get("rolling_summary", "")
     logger.info(
         "Unified memory timing | stage=get_stm_summary | duration_min={}",
         elapsed_minutes(stm_summary_started_at),

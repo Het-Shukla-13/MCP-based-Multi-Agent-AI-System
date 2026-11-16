@@ -1,5 +1,10 @@
 from pydantic import BaseModel, Field
-from typing import Optional, Dict
+from typing import Literal, Optional, Dict
+
+
+class HistoryMessage(BaseModel):
+    role: Literal["user", "assistant"]
+    content: str
 
 
 class AgentContext(BaseModel):
@@ -8,9 +13,14 @@ class AgentContext(BaseModel):
     user_message: str
 
     # MEMORY LAYER (your system)
+    # Recent turns from OUR database (token-limited window, oldest first), excluding
+    # the current user message. This, not ADK's session store, is the agent's history.
+    history: list[HistoryMessage] = Field(default_factory=list)
     stm_context: str = ""
     ltm_context: str = ""
     profile_context: str = ""
+
+    related_conversations_context: str = ""
 
     # RAG / FILE CONTEXT
     rag_context: str = ""

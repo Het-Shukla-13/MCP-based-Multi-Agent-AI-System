@@ -41,6 +41,10 @@ class Settings(BaseSettings):
     PROFILE_MAX_LLM_COMPARISONS_PER_REFRESH: int = 3
     PROFILE_DUPLICATE_SIMILARITY_THRESHOLD: float = 0.92
     PROFILE_CONFLICT_SIMILARITY_THRESHOLD: float = 0.82
+    # --- Memory relevance (L2 distance on normalized embeddings: 0 = identical, 2 = opposite) ---
+    # Memories farther than this from the query are not shown to the agent.
+    MEMORY_MAX_DISTANCE: float = 1.1
+    RELATED_CONVERSATION_MAX_DISTANCE: float = 1.0
     FILE_PROCESSING_BACKEND: str = "local"
     CELERY_BROKER_URL: str | None = None
     CELERY_RESULT_BACKEND: str | None = None

@@ -5,8 +5,6 @@ from app.prompts.file_generation import USER_PROMPT as FILE_GENERATION_USER_PROM
 from app.prompts.chat import SYSTEM_PROMPT as CHAT_SYSTEM_PROMPT
 from app.prompts.summarization import SYSTEM_PROMPT as SUMMARIZATION_SYSTEM_PROMPT
 from app.prompts.summarization import USER_PROMPT as SUMMARIZATION_USER_PROMPT
-from app.prompts.context_router import SYSTEM_PROMPT as CONTEXT_ROUTER_SYSTEM_PROMPT
-from app.prompts.context_router import USER_PROMPT as CONTEXT_ROUTER_USER_PROMPT
 from app.prompts.conversation_metadata import SYSTEM_PROMPT as CONVERSATION_METADATA_SYSTEM_PROMPT
 from app.prompts.conversation_metadata import USER_PROMPT as CONVERSATION_METADATA_USER_PROMPT
 from app.prompts.memory_comparison import SYSTEM_PROMPT as MEMORY_COMPARISON_SYSTEM_PROMPT
@@ -26,8 +24,6 @@ __all__ = [
     "CHAT_SYSTEM_PROMPT",
     "SUMMARIZATION_SYSTEM_PROMPT",
     "SUMMARIZATION_USER_PROMPT",
-    "CONTEXT_ROUTER_SYSTEM_PROMPT",
-    "CONTEXT_ROUTER_USER_PROMPT",
     "CONVERSATION_METADATA_USER_PROMPT",
     "CONVERSATION_METADATA_SYSTEM_PROMPT",
     "MEMORY_COMPARISON_USER_PROMPT",
