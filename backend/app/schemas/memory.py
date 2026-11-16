@@ -124,3 +124,37 @@ class MemoryProfileAnnotation(BaseModel):
         ge=0.0,
         le=1.0,
     )
+
+# ---- Public API shapes (memory management endpoints) ----
+
+class MemoryOut(BaseModel):
+    """Memory as returned by the API (no embedding vector: large and useless to clients)."""
+    id: UUID
+    user_id: UUID
+    conversation_id: Optional[UUID] = None
+    content: str
+    memory_type: str
+    memory_metadata: dict
+    importance_score: float
+    source: str
+    is_active: bool
+    created_at: datetime
+    updated_at: datetime
+    distance: Optional[float] = None  # only set for search results
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class MemoryCreateRequest(BaseModel):
+    user_id: UUID
+    content: str = Field(min_length=1, max_length=2000)
+    memory_type: MemoryType
+    importance_score: float = Field(default=0.7, ge=0.0, le=1.0)
+    memory_metadata: dict = Field(default_factory=dict)
+
+
+class MemoryPatchRequest(BaseModel):
+    content: Optional[str] = Field(default=None, min_length=1, max_length=2000)
+    memory_type: Optional[MemoryType] = None
+    importance_score: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+    is_active: Optional[bool] = None
