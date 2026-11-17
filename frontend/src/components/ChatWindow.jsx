@@ -8,6 +8,10 @@ export default function ChatWindow({
   agentStatus,
   agents,
   progress,
+  connectionState,
+  queue,
+  onRemoveQueued,
+  onStop,
   attachedFiles,
   conversation,
   isLoading,
@@ -71,6 +75,10 @@ export default function ChatWindow({
       />
       <MessageInput
         agents={agents}
+        connectionState={connectionState}
+        queue={queue}
+        onRemoveQueued={onRemoveQueued}
+        onStop={onStop}
         attachedFiles={attachedFiles}
         disabled={!conversation}
         isSending={isSending}

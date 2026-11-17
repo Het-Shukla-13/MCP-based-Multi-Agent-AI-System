@@ -99,7 +99,7 @@ export default function ChatPage({ user, onLogout }) {
     }
   }, []);
 
-  const { agentStatus, connectionState, isSending, progress, sendMessage } = useConversationSocket({
+  const { agentStatus, connectionState, isSending, progress, queue, removeQueued, sendMessage, stop } = useConversationSocket({
     selectedAgent: pinnedAgent,
     selectedConversationId,
     setMessagesByConversation,
@@ -561,6 +561,10 @@ export default function ChatPage({ user, onLogout }) {
           activeAgent={activeAgent}
           agentStatus={agentStatus}
           progress={progress}
+          connectionState={connectionState}
+          queue={queue}
+          onRemoveQueued={removeQueued}
+          onStop={stop}
           agents={agents}
           attachedFiles={attachedFiles}
           conversation={selectedConversation}
