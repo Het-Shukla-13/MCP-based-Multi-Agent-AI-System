@@ -1,7 +1,9 @@
 import atexit
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
+import contextvars
 import json
+from contextvars import ContextVar
 from time import perf_counter
 
 from loguru import logger
@@ -9,6 +11,7 @@ from openai import OpenAI
 from groq import Groq
 
 from app.core.config import settings
+from app.services.metrics.collector import current_turn, record_llm_call
 
 CHAT_PURPOSE_PREFIXES = ("chat_response", "stm_summarization")
 MAINTENANCE_PURPOSE_PREFIXES = (
@@ -115,6 +118,25 @@ def _is_retryable_with_fallback(exc: Exception) -> bool:
     )
 
 
+_purpose_var: ContextVar[str] = ContextVar("llm_purpose", default="unspecified")
+
+
+def _record_usage(model_name: str, response, duration_ms: int) -> None:
+    usage = getattr(response, "usage", None)
+    kwargs = dict(
+        purpose=_purpose_var.get(),
+        model=model_name,
+        input_tokens=getattr(usage, "prompt_tokens", 0) or 0,
+        output_tokens=getattr(usage, "completion_tokens", 0) or 0,
+        duration_ms=duration_ms,
+    )
+    turn = current_turn.get()
+    if turn is not None:
+        turn.record_llm(**kwargs)  # counts toward the chat turn that triggered it
+    else:
+        record_llm_call(**kwargs)  # background job outside a turn
+
+
 def _call_model(model_name: str, messages, response_format: dict | None):
     if _is_gemini_model(model_name):
         client = get_gemini_client()
@@ -135,7 +157,9 @@ def _call_model(model_name: str, messages, response_format: dict | None):
             "include_reasoning": False,  # we only want the final answer back
         }
 
+    started = perf_counter()
     response = client.chat.completions.create(**params)
+    _record_usage(model_name, response, int((perf_counter() - started) * 1000))
     return response.choices[0].message.content
 
 
@@ -168,6 +192,9 @@ def get_llm_response(
             purpose, model_name, fallback, exc,
         )
         model_name = fallback
+        turn = current_turn.get()
+        if turn is not None:
+            turn.fallback_used = True
         content = _call_model(model_name, messages, response_format)
 
     duration_min = round((perf_counter() - started_at) / 60, 4)
@@ -188,11 +215,14 @@ async def get_llm_response_async(
 ):
     loop = asyncio.get_running_loop()
     executor = _resolve_executor_for_purpose(purpose)
-    return await loop.run_in_executor(
-        executor,
-        get_llm_response,
-        messages,
-        purpose,
-        response_format,
-    )
+    # run_in_executor does NOT carry ContextVars into the worker thread (unlike
+    # asyncio.to_thread). Copy the context explicitly so the call is attributed to the
+    # right turn/user, and set the purpose inside that copied context.
+    context = contextvars.copy_context()
+
+    def call():
+        _purpose_var.set(purpose)
+        return get_llm_response(messages, purpose, response_format)
+
+    return await loop.run_in_executor(executor, context.run, call)
 

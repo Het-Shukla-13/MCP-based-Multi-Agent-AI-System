@@ -6,5 +6,6 @@ from app.models.memory import Memory
 from app.models.user_profile_snapshot import UserProfileSnapshot
 from app.models.chunks import Chunk
 from app.models.refresh_token import RefreshToken
+from app.models.metrics import LlmCall, TurnMetric
 
 __all__ = ["User", "Conversation", "Message", "File", "Memory", "UserProfileSnapshot", "Chunk"]

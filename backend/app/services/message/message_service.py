@@ -19,6 +19,7 @@ from app.services.memory.background_memory_pipeline import (
 from app.services.user_profile.user_profile_cache_service import schedule_profile_snapshot_update
 from app.agent_layer.agents.root_agent import AgentExecutionError, RootAgent, StatusCallback
 from app.agent_layer.core.mentions import parse_agent_mention
+from app.services.metrics.collector import TurnCollector, current_turn
 from app.agent_layer.schemas import AgentContext, HistoryMessage
 from app.agent_layer.core.state import get_agent_state, set_active_agent
 
@@ -198,7 +199,39 @@ async def send_message(
     on_status: StatusCallback | None = None,
     requested_format: str | None = None,
 ) -> dict[str, Message]:
+    """
+    One chat turn, measured. The collector is published in a ContextVar for the
+    duration of the turn and ALWAYS reset afterwards: every message on a WebSocket
+    runs in the same task, so a leftover value would leak into the next turn.
+    Metrics are queued (non-blocking) after the reply is saved.
+    """
+    collector = TurnCollector(user_id=payload.user_id, conversation_id=payload.conversation_id)
+    token = current_turn.set(collector)
+    try:
+        result = await _send_message(db, payload, rag_context, selected_agent, on_status, requested_format)
+        collector.finish(
+            message_id=result["ai_message"].id,
+            agent_name=result["active_agent"],
+            error=result["error"],
+        )
+        return result
+    except Exception:
+        collector.finish(message_id=None, agent_name=None, error=True)
+        raise
+    finally:
+        current_turn.reset(token)
+
+
+async def _send_message(
+    db: AsyncSession,
+    payload: MessageCreate,
+    rag_context: str,
+    selected_agent: str | None,
+    on_status: StatusCallback | None,
+    requested_format: str | None,
+) -> dict[str, Message]:
     turn_started_at = perf_counter()
+    collector = current_turn.get()
     payload.token_count = get_message_token_count(payload)
 
     create_user_started_at = perf_counter()
@@ -293,6 +326,8 @@ async def send_message(
     )
 
     ai_response_started_at = perf_counter()
+    collector.context_ms = int((ai_response_started_at - collector.started) * 1000)
+    collector.mode = "explicit" if explicit_agent else "routed"
     agent_error = False
     generated_file_ids: list = []
     try:
@@ -310,6 +345,7 @@ async def send_message(
         answered_by = exc.agent_name
         ai_content = AGENT_ERROR_REPLY
     
+    collector.agent_ms = int((perf_counter() - ai_response_started_at) * 1000)
     logger.info(
             "Chat timing | stage=generate_ai_response | duration_min={}",
             elapsed_minutes(ai_response_started_at),

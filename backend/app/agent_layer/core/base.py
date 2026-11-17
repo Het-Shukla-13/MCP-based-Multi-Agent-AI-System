@@ -15,6 +15,7 @@ from typing import Any
 from app.agent_layer.schemas import AgentContext, AgentResponse
 from app.agent_layer.tools.mcp_registry import IDENTITY_ARGS, get_toolsets_for_agent
 from app.core.config import settings
+from app.services.metrics.collector import current_turn, observe_adk_event
 
 logger = logging.getLogger(__name__)
 
@@ -243,6 +244,7 @@ class BaseAgent(ABC):
             new_message=Content(role="user", parts=[Part.from_text(text=prompt)]),
             run_config=run_config(),
         ):
+            observe_adk_event(event, model)  # metrics: tokens, tool timings, first token
             await emit_tool_events(on_status, event)
             await emit_text_delta(on_status, event)
             if generated_files is not None:
@@ -279,6 +281,9 @@ class BaseAgent(ABC):
                 "Agent '%s' failed on '%s' (retryable). Falling back to '%s'. error=%s",
                 self.name, primary_model, fallback_model, primary_exc,
             )
+            turn = current_turn.get()
+            if turn is not None:
+                turn.fallback_used = True
             # Fallback uses its own fresh agent object; nothing shared is mutated.
             generated = []
             final_text = await self._run_with_model(context, prompt, fallback_model, on_status, generated)
