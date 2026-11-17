@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { ListPlus, Paperclip, SendHorizontal, Square, WifiOff, X } from "lucide-react";
 import { agentIcon, agentLabel } from "../lib/agents";
 import { ACCEPT_ATTRIBUTE } from "../lib/uploads";
 
@@ -16,6 +17,8 @@ const FILE_FORMATS = [
  * at the start or after whitespace, so e-mail addresses ("me@code.dev") don't open
  * the agent menu (the backend's mention parser uses the same rule).
  */
+const MAX_INPUT_HEIGHT = 220; // px; beyond this the textarea scrolls
+
 function findMention(value, cursor) {
   const match = /(^|\s)@([a-z_]*)$/i.exec(value.slice(0, cursor));
   return match ? { query: match[2].toLowerCase(), start: cursor - match[2].length - 1 } : null;
@@ -24,8 +27,12 @@ function findMention(value, cursor) {
 export default function MessageInput({
   agents,
   attachedFiles,
+  connectionState,
   disabled,
   isSending,
+  onRemoveQueued,
+  onStop,
+  queue = [],
   isUploading,
   onAttachFiles,
   onClearAttachedFiles,
@@ -42,7 +49,17 @@ export default function MessageInput({
   const textareaRef = useRef(null);
   const menuRef = useRef(null);
 
-  const isSendBlocked = disabled || isSending || isUploading || !text.trim() || Boolean(sendDisabledReason);
+  const offline = !disabled && connectionState !== "connected";
+  // While a reply is being written you can keep typing: Send becomes "Queue".
+  const isSendBlocked = disabled || offline || isUploading || !text.trim() || Boolean(sendDisabledReason);
+
+  // Auto-grow: reset to auto, then fit the content (capped; the rest scrolls).
+  useLayoutEffect(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, MAX_INPUT_HEIGHT)}px`;
+  }, [text]);
   const suggestions = mention ? agents.filter((a) => a.name.startsWith(mention.query)) : [];
 
   const submit = async () => {
@@ -114,7 +131,7 @@ export default function MessageInput({
     return () => document.removeEventListener("mousedown", close);
   }, []);
 
-  const inputDisabled = disabled || isSending || isUploading;
+  const inputDisabled = disabled || isUploading;
 
   return (
     <div className="composer-shell">
@@ -156,6 +173,28 @@ export default function MessageInput({
         </div>
       ) : null}
 
+      {offline ? (
+        <p className="composer-notice" role="status">
+          <WifiOff aria-hidden="true" size={15} />
+          {connectionState === "reconnecting" ? "Connection lost. Reconnecting..." : "Connecting..."} You can keep typing.
+        </p>
+      ) : null}
+
+      {queue.length > 0 ? (
+        <ol aria-label="Queued messages" className="composer-queue">
+          {queue.map((item, index) => (
+            <li className="composer-queue__item" key={item.clientId || item.turnId}>
+              <ListPlus aria-hidden="true" size={14} />
+              <span className="composer-queue__label">Queued {index + 1}</span>
+              <span className="composer-queue__text" title={item.content}>{item.content}</span>
+              <button aria-label={`Remove queued message ${index + 1}`} className="icon-button" onClick={() => onRemoveQueued(item)} type="button">
+                <X aria-hidden="true" size={14} />
+              </button>
+            </li>
+          ))}
+        </ol>
+      ) : null}
+
       <div className="composer">
         <div className="composer-main">
           {attachedFiles.length > 0 ? (
@@ -181,20 +220,30 @@ export default function MessageInput({
             onKeyDown={handleKeyDown}
             placeholder={disabled ? "Select or create a conversation" : "Message... (@ to mention an agent, drop files anywhere)"}
             ref={textareaRef}
-            rows={2}
+            rows={1}
             value={text}
           />
           {sendDisabledReason ? <p className="composer-help-text">{sendDisabledReason}</p> : null}
           <div className="composer-actions">
-            <label className="secondary-button composer-upload-button">
+            <label className="secondary-button composer-upload-button button-with-icon">
               <input accept={ACCEPT_ATTRIBUTE} className="composer-file-input" disabled={inputDisabled} multiple onChange={handleFileChange} type="file" />
+              <Paperclip aria-hidden="true" size={15} />
               Add files
             </label>
+            <div className="composer-buttons">
+              {isSending ? (
+                <button className="secondary-button button-with-icon composer-stop" onClick={onStop} type="button">
+                  <Square aria-hidden="true" size={13} fill="currentColor" />
+                  Stop
+                </button>
+              ) : null}
+              <button className="primary-button button-with-icon" disabled={isSendBlocked} onClick={() => void submit()} type="button">
+                {isUploading ? "Uploading..." : isSending ? "Queue" : "Send"}
+                {isUploading ? null : <SendHorizontal aria-hidden="true" size={15} />}
+              </button>
+            </div>
           </div>
         </div>
-        <button className="primary-button" disabled={isSendBlocked} onClick={() => void submit()} type="button">
-          {isUploading ? "Uploading..." : isSending ? "Sending..." : "Send"}
-        </button>
       </div>
     </div>
   );

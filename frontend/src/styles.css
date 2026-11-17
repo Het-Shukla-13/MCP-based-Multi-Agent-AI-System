@@ -382,10 +382,7 @@ button {
 }
 
 .composer {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 0.75rem;
-  align-items: end;
+  display: block;
 }
 
 .composer-main {
@@ -488,7 +485,74 @@ button {
 
 .composer-actions {
   display: flex;
-  justify-content: flex-start;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.composer-buttons {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.composer-buttons .primary-button {
+  padding: var(--space-2) var(--space-4);
+}
+
+.composer-stop {
+  color: var(--danger-text);
+}
+
+.composer-stop:hover {
+  background: var(--danger-soft);
+}
+
+.composer-notice {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0 0 var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  background: var(--warning-soft);
+  color: var(--warning-text);
+  font-size: var(--text-sm);
+}
+
+.composer-queue {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin: 0 0 var(--space-2);
+  padding: 0;
+  list-style: none;
+}
+
+.composer-queue__item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-1) var(--space-1) var(--space-3);
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-md);
+  background: var(--surface-subtle);
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+}
+
+.composer-queue__label {
+  flex-shrink: 0;
+  font-weight: var(--weight-semibold);
+  color: var(--text-muted);
+}
+
+.composer-queue__text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .generation-preview {
@@ -564,10 +628,12 @@ button {
 }
 
 .composer-input {
+  display: block;
   width: 100%;
-  min-height: 72px;
-  max-height: 180px;
-  resize: vertical;
+  min-height: 48px;
+  max-height: 220px; /* JS auto-grows up to this, then it scrolls */
+  resize: none;
+  line-height: var(--leading-normal);
   border-radius: var(--radius-lg);
   border: 1px solid var(--border);
   background: var(--surface-raised);
@@ -1299,15 +1365,8 @@ button {
     padding: 0.6rem;
   }
 
-  .composer {
-    display: flex;
-    flex-direction: row;
-    align-items: flex-end;
-    gap: 0.5rem;
-  }
-
-  .composer .primary-button {
-    padding: 0.65rem 0.85rem;
+  .composer-buttons .primary-button {
+    padding: var(--space-2) var(--space-3);
   }
 
   .composer-toolbar {
@@ -1673,4 +1732,54 @@ button {
   .stream-cursor {
     animation: none !important;
   }
+}
+
+/* ---------- scroll: follow only at the bottom, "Latest" otherwise ---------- */
+.message-list-wrap {
+  position: relative;
+  display: grid;
+  min-height: 0;
+}
+
+.message-list-wrap > .message-list {
+  height: 100%;
+}
+
+.jump-to-latest {
+  position: absolute;
+  left: 50%;
+  bottom: var(--space-4);
+  transform: translateX(-50%);
+  padding: var(--space-2) var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-md);
+  color: var(--text);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+}
+
+.jump-to-latest:hover {
+  background: var(--surface-hover);
+}
+
+.message-meta__end {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.message-badge {
+  padding: 1px var(--space-2);
+  border-radius: var(--radius-pill);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  background: var(--surface-subtle);
+  color: var(--text-muted);
+}
+
+.message-badge--interrupted {
+  background: var(--warning-soft);
+  color: var(--warning-text);
 }

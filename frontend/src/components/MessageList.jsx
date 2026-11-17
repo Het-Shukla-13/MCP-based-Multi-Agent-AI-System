@@ -1,5 +1,5 @@
-import { Fragment, useEffect, useRef } from "react";
-import { CornerDownRight } from "lucide-react";
+import { Fragment, useLayoutEffect, useRef, useState } from "react";
+import { ArrowDown, CornerDownRight } from "lucide-react";
 import { generatedFileUrl } from "../lib/api";
 import { agentIcon, agentLabel } from "../lib/agents";
 import ThinkingIndicator from "./ThinkingIndicator";
@@ -26,11 +26,34 @@ function renderContentWithLinks(content) {
 }
 
 export default function MessageList({ agentStatus, agents, conversation, isLoading, isSending, messages, progress }) {
-  const endRef = useRef(null);
+  const listRef = useRef(null);
+  const stickRef = useRef(true); // follow new content only while the user is at the bottom
+  const conversationRef = useRef(null);
+  const [isAtBottom, setIsAtBottom] = useState(true);
 
-  useEffect(() => {
-    endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
-  }, [messages, isSending, agentStatus, progress]);
+  const handleScroll = () => {
+    const el = listRef.current;
+    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+    stickRef.current = atBottom;
+    setIsAtBottom(atBottom);
+  };
+
+  const scrollToBottom = (smooth = false) => {
+    const el = listRef.current;
+    if (!el) return;
+    el.scrollTo({ top: el.scrollHeight, behavior: smooth ? "smooth" : "auto" });
+    stickRef.current = true;
+  };
+
+  // Layout effect: runs before paint, so following a stream never flickers.
+  useLayoutEffect(() => {
+    const switched = conversationRef.current !== conversation?.id;
+    conversationRef.current = conversation?.id;
+    const last = messages[messages.length - 1];
+    const justSent = last?.role === "user" && last?.pending;
+    // Instant, not smooth: smooth scrolling lags behind a fast stream.
+    if (switched || justSent || stickRef.current) scrollToBottom(false);
+  }, [messages, isSending, agentStatus, progress, conversation?.id]);
 
   if (!conversation) {
     return (
@@ -75,7 +98,8 @@ export default function MessageList({ agentStatus, agents, conversation, isLoadi
   }
 
   return (
-    <div className="message-list">
+    <div className="message-list-wrap">
+    <div className="message-list" onScroll={handleScroll} ref={listRef}>
       {messages.map((message) => {
         const isAssistant = message.role === "assistant";
         const agent = isAssistant ? message.agent_name || "general" : null;
@@ -104,7 +128,14 @@ export default function MessageList({ agentStatus, agents, conversation, isLoadi
                 <span className="message-role">
                   {isAssistant ? <>{agentIcon(agent, 15)} {agentLabel(agents, agent)}</> : "You"}
                 </span>
-                <span className="message-time">{message.pending ? "Sending..." : formatTime(message.created_at)}</span>
+                <span className="message-meta__end">
+                  {message.status === "stopped" || message.status === "interrupted" ? (
+                    <span className={`message-badge message-badge--${message.status}`}>
+                      {message.status === "stopped" ? "Stopped" : "Interrupted"}
+                    </span>
+                  ) : null}
+                  <span className="message-time">{message.pending ? "Sending..." : formatTime(message.created_at)}</span>
+                </span>
               </div>
               <div className={`message-body${isAssistant ? " message-body--markdown" : ""}`}>
                 {isAssistant ? <MarkdownMessage content={message.content} /> : renderContentWithLinks(message.content)}
@@ -130,7 +161,13 @@ export default function MessageList({ agentStatus, agents, conversation, isLoadi
 
       {isSending && !isStreaming ? <ThinkingIndicator agents={agents} progress={progress} /> : null}
 
-      <div ref={endRef} />
+    </div>
+    {isAtBottom ? null : (
+      <button className="jump-to-latest button-with-icon" onClick={() => scrollToBottom(true)} type="button">
+        <ArrowDown aria-hidden="true" size={15} />
+        Latest
+      </button>
+    )}
     </div>
   );
 }

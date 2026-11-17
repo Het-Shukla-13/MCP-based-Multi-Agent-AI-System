@@ -29,9 +29,10 @@ const BASE_DELAY_MS = 1000;
 const MAX_DELAY_MS = 15000;
 const POLICY_VIOLATION = 1008; // server's "not authenticated / not your conversation"
 
-function createTempMessage(content, fileIds) {
+function createTempMessage(content, fileIds, clientId) {
   return {
-    id: `temp-${crypto.randomUUID()}`,
+    id: `temp-${clientId}`,
+    clientId,
     content,
     created_at: new Date().toISOString(),
     pending: true,
@@ -50,9 +51,11 @@ function appendDraft(messages, text, agent) {
   ];
 }
 
-function replaceWithSaved(messages, userMessage, aiMessage) {
+function replaceWithSaved(messages, userMessage, aiMessage, clientId) {
   const next = messages.filter((m) => m.id !== DRAFT_ID);
-  const pendingIndex = next.findIndex((m) => m.pending && m.role === "user");
+  // Match the optimistic bubble by client_id (several can exist once messages queue).
+  let pendingIndex = clientId ? next.findIndex((m) => m.pending && m.clientId === clientId) : -1;
+  if (pendingIndex < 0) pendingIndex = next.findIndex((m) => m.pending && m.role === "user");
   if (pendingIndex >= 0) next.splice(pendingIndex, 1, userMessage);
   else if (!next.some((m) => m.id === userMessage.id)) next.push(userMessage);
   if (!next.some((m) => m.id === aiMessage.id)) next.push(aiMessage);
@@ -79,6 +82,25 @@ export function useConversationSocket({
   const [sendingConversationId, setSendingConversationId] = useState("");
   const [agentStatus, setAgentStatus] = useState(null); // {conversationId, status, agent, tool}
   const [progress, setProgress] = useState({ conversationId: null, state: null }); // checklist (turnProgress.js)
+  // Messages waiting on the server while another reply is written: [{clientId, turnId, content}]
+  const [queue, setQueue] = useState({ conversationId: null, items: [] });
+  // The ref is the synchronous source of truth; state only triggers re-renders.
+  // (Reading values out of a functional setState updater doesn't work: React runs
+  // updaters later, during render, in hook order - and StrictMode runs them twice.)
+  const queueRef = useRef({ conversationId: null, items: [] });
+  const writeQueue = useCallback((conversationId, compute) => {
+    const items = queueRef.current.conversationId === conversationId ? queueRef.current.items : [];
+    const next = { conversationId, items: compute(items) };
+    queueRef.current = next;
+    setQueue(next);
+    return items; // the PREVIOUS items, for callers that need what was there
+  }, []);
+  const sendingRef = useRef("");
+  // client_ids sent but not yet confirmed by turn_queued/turn_started (oldest first).
+  const unconfirmedRef = useRef([]);
+  useEffect(() => {
+    sendingRef.current = sendingConversationId;
+  }, [sendingConversationId]);
   const onResyncRef = useRef(onResync);
   useEffect(() => {
     onResyncRef.current = onResync;
@@ -150,6 +172,56 @@ export function useConversationSocket({
           }
           setProgress({ conversationId, state: progressFromSnapshot(current) });
         }
+        writeQueue(conversationId, () =>
+          (data.queued || []).map((q) => ({ clientId: q.client_id, turnId: q.turn_id, content: q.content }))
+        );
+        return;
+      }
+
+      const confirm = (clientId) => {
+        unconfirmedRef.current = unconfirmedRef.current.filter((id) => id !== clientId);
+      };
+
+      if (payload.type === "turn_queued") {
+        confirm(data.client_id);
+        // Our optimistic chip is now a real server turn: remember its id (for "remove").
+        writeQueue(conversationId, (items) =>
+          items.map((q) => (q.clientId && q.clientId === data.client_id ? { ...q, turnId: data.turn_id } : q))
+        );
+        return;
+      }
+
+      if (payload.type === "turn_started") {
+        confirm(data.client_id);
+        flushNow();
+        writing = false;
+        setSendingConversationId(conversationId);
+        setProgress({ conversationId, state: progressReducer(null, { status: "routing" }) });
+        // A queued message is starting: move it from the queue into the conversation.
+        const isThis = (q) => (data.client_id && q.clientId === data.client_id) || q.turnId === data.turn_id;
+        const started = writeQueue(conversationId, (items) => items.filter((q) => !isThis(q))).find(isThis);
+        if (started) {
+          updateMessages(conversationId, (messages) =>
+            messages.some((m) => m.clientId === started.clientId)
+              ? messages
+              : [...messages, createTempMessage(started.content, [], started.clientId)]
+          );
+        }
+        return;
+      }
+
+      if (payload.type === "turn_finished") {
+        // Covers turns that end WITHOUT a chat event: stopped before the question was
+        // saved, or a queued message removed by the user.
+        writeQueue(conversationId, (items) =>
+          items.filter((q) => q.turnId !== data.turn_id && !(data.client_id && q.clientId === data.client_id))
+        );
+        if (data.status !== "done") {
+          updateMessages(conversationId, (messages) =>
+            messages.filter((m) => !(m.pending && data.client_id && m.clientId === data.client_id) && m.id !== DRAFT_ID)
+          );
+        }
+        if (sendingRef.current === conversationId) finishTurn();
         return;
       }
 
@@ -173,17 +245,36 @@ export function useConversationSocket({
       if (payload.type === "chat") {
         flushNow(); // apply any buffered text before the saved message replaces the draft
         const aiMessage = { ...data.ai_message, error: data.error === true };
-        updateMessages(conversationId, (messages) => replaceWithSaved(messages, data.user_message, aiMessage));
+        updateMessages(conversationId, (messages) => replaceWithSaved(messages, data.user_message, aiMessage, data.client_id));
         finishTurn();
         if (data.error) setStatusMessage("The assistant could not complete that request.", "error");
         return;
       }
 
       if (payload.type === "error") {
-        flushNow();
-        updateMessages(conversationId, (messages) => messages.filter((m) => !m.pending && m.id !== DRAFT_ID));
-        finishTurn();
         setStatusMessage(payload.detail || "Failed to process the message.", "error");
+        if (payload.turn_id) {
+          // A turn failed: drop its optimistic bubble and the draft, end the turn.
+          flushNow();
+          updateMessages(conversationId, (messages) =>
+            messages.filter((m) => !(m.pending && (!payload.client_id || m.clientId === payload.client_id)) && m.id !== DRAFT_ID)
+          );
+          finishTurn();
+          return;
+        }
+        // A rejected COMMAND (queue full, message too long, nothing to stop): the reply
+        // being written is fine. Undo only the newest send the server never accepted.
+        const rejected = unconfirmedRef.current.at(-1);
+        if (!rejected) return;
+        unconfirmedRef.current = unconfirmedRef.current.slice(0, -1);
+        // Every send is either a queued chip or the running bubble: if it wasn't in
+        // the queue, it was the turn we optimistically showed as running.
+        const wasChip = writeQueue(conversationId, (items) => items.filter((q) => q.clientId !== rejected))
+          .some((q) => q.clientId === rejected);
+        if (!wasChip) {
+          updateMessages(conversationId, (messages) => messages.filter((m) => m.clientId !== rejected));
+          finishTurn();
+        }
       }
     };
 
@@ -257,7 +348,7 @@ export function useConversationSocket({
       if (socket) socket.close();
       if (socketRef.current === socket) socketRef.current = null;
     };
-  }, [selectedConversationId, setStatusMessage, updateMessages]);
+  }, [selectedConversationId, setStatusMessage, updateMessages, writeQueue]);
 
   const sendMessage = (content, attachedFileIds = [], options = {}) => {
     const socket = socketRef.current;
@@ -265,18 +356,42 @@ export function useConversationSocket({
       setStatusMessage("Not connected right now. Reconnecting; try again in a moment.", "warning");
       return false;
     }
-    updateMessages(selectedConversationId, (messages) => [...messages, createTempMessage(content, attachedFileIds)]);
-    setSendingConversationId(selectedConversationId);
-    setStatusMessage("");
+    const clientId = crypto.randomUUID();
+    unconfirmedRef.current = [...unconfirmedRef.current, clientId];
+    if (sendingConversationId === selectedConversationId) {
+      // A reply is being written: the server queues this one. Show it as a chip.
+      writeQueue(selectedConversationId, (items) => [...items, { clientId, turnId: null, content }]);
+    } else {
+      updateMessages(selectedConversationId, (messages) => [...messages, createTempMessage(content, attachedFileIds, clientId)]);
+      setSendingConversationId(selectedConversationId);
+    }
     socket.send(
       JSON.stringify({
         content,
+        client_id: clientId, // echoed back on every event of this turn
+        confirm_tools: false, // the confirmation UI comes with the next branch
         file_ids: attachedFileIds,
         selected_agent: selectedAgent || null, // explicit pick skips the router
         format: options.format || null, // ask the agent for a downloadable file
       })
     );
     return true;
+  };
+
+  const sendCommand = (command) => {
+    const socket = socketRef.current;
+    if (!socket || socket.readyState !== WebSocket.OPEN) return false;
+    socket.send(JSON.stringify(command));
+    return true;
+  };
+
+  /** Stop the reply being written (the server keeps the partial answer). */
+  const stop = () => sendCommand({ type: "stop" });
+
+  /** Remove a queued message before it starts. */
+  const removeQueued = (item) => {
+    if (item.turnId) sendCommand({ type: "dequeue", turn_id: item.turnId });
+    else writeQueue(selectedConversationId, (items) => items.filter((q) => q !== item));
   };
 
   // Derived (not stored) state: what applies to the conversation on screen now.
@@ -289,6 +404,9 @@ export function useConversationSocket({
   return {
     agentStatus: agentStatus?.conversationId === selectedConversationId ? agentStatus : null,
     progress: progress.conversationId === selectedConversationId ? progress.state : null,
+    queue: queue.conversationId === selectedConversationId ? queue.items : [],
+    removeQueued,
+    stop,
     connectionState,
     isSending: !!selectedConversationId && sendingConversationId === selectedConversationId,
     sendMessage,
