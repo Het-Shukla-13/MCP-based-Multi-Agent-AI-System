@@ -49,7 +49,9 @@ async def websocket_endpoint(websocket: WebSocket, conversation_id: UUID):
     Server -> client:
       turn_state (on connect: running turn + draft + queue), turn_queued, turn_started,
       agent_status, chat_delta, tool_confirmation, tool_confirmation_resolved,
-      chat (saved messages), turn_finished, error
+      chat (saved messages), turn_finished,
+      error {detail, command?, client_id?, confirmation_id?, turn_id?}
+        (a rejected command echoes its type and ids; a failed TURN carries turn_id)
     """
     # Browsers can't set headers on a WebSocket, so the access token comes as
     # ?token=. The user id is DERIVED from it; a client-supplied user_id is ignored.
@@ -75,21 +77,33 @@ async def websocket_endpoint(websocket: WebSocket, conversation_id: UUID):
     try:
         while True:
             raw = await websocket.receive_text()
+            command: dict = {}
+            kind = "unknown"
+
+            async def reject(detail: str) -> None:
+                # Errors echo WHICH command they answer, so the client can undo exactly
+                # that (a failed "confirm" must not be mistaken for a rejected send).
+                frame = {"type": "error", "detail": detail, "command": kind}
+                for key in ("client_id", "confirmation_id", "turn_id"):
+                    if command.get(key):
+                        frame[key] = str(command[key])[:64]
+                await websocket.send_json(frame)
+
             try:
                 command = json.loads(raw)
                 if not isinstance(command, dict):
+                    command = {}
                     raise ValueError("Expected a JSON object.")
                 kind = command.get("type") or "send"
                 if kind == "stop":
-                    stopped = await turn_runner.stop(conversation_id)
-                    if not stopped:
-                        await websocket.send_json({"type": "error", "detail": "Nothing is running."})
+                    if not await turn_runner.stop(conversation_id):
+                        await reject("Nothing is running.")
                 elif kind == "confirm":
                     ok = await turn_runner.confirm(
                         conversation_id, str(command.get("confirmation_id") or ""),
                         str(command.get("decision") or ""), str(command.get("feedback") or ""))
                     if not ok:
-                        await websocket.send_json({"type": "error", "detail": "That confirmation is no longer pending."})
+                        await reject("That confirmation is no longer pending.")
                 elif kind == "dequeue":
                     await turn_runner.dequeue(conversation_id, UUID(str(command.get("turn_id"))))
                 elif kind == "send":
@@ -103,10 +117,10 @@ async def websocket_endpoint(websocket: WebSocket, conversation_id: UUID):
                 else:
                     raise ValueError(f"Unknown command type: {kind}")
             except (QueueFullError, ValueError) as exc:
-                await websocket.send_json({"type": "error", "detail": str(exc)})
+                await reject(str(exc))
             except Exception:
                 logger.exception("WebSocket command failed | conversation=%s", conversation_id)
-                await websocket.send_json({"type": "error", "detail": "Failed to process the message."})
+                await reject("Failed to process the message.")
     except WebSocketDisconnect:
         pass  # running turns continue; their result is saved and replayed on reconnect
     finally:
