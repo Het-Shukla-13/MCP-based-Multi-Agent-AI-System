@@ -7,6 +7,8 @@ export default function ChatWindow({
   activeAgent,
   agentStatus,
   agents,
+  confirmations,
+  onConfirmTool,
   progress,
   connectionState,
   queue,
@@ -67,6 +69,8 @@ export default function ChatWindow({
       <MessageList
         agentStatus={agentStatus}
         agents={agents}
+        confirmations={confirmations}
+        onConfirmTool={onConfirmTool}
         progress={progress}
         conversation={conversation}
         isLoading={isLoading}

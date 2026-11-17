@@ -84,6 +84,8 @@ export function useConversationSocket({
   const [progress, setProgress] = useState({ conversationId: null, state: null }); // checklist (turnProgress.js)
   // Messages waiting on the server while another reply is written: [{clientId, turnId, content}]
   const [queue, setQueue] = useState({ conversationId: null, items: [] });
+  // Tool calls waiting for the user's approval: [{id, agent, tool, args, expiresAt, submitting}]
+  const [confirmations, setConfirmations] = useState({ conversationId: null, items: [] });
   // The ref is the synchronous source of truth; state only triggers re-renders.
   // (Reading values out of a functional setState updater doesn't work: React runs
   // updaters later, during render, in hook order - and StrictMode runs them twice.)
@@ -153,7 +155,17 @@ export function useConversationSocket({
       setSendingConversationId((c) => (c === conversationId ? "" : c));
       setAgentStatus(null);
       setProgress({ conversationId, state: null });
+      setConfirmations({ conversationId, items: [] });
     };
+
+    const toCard = (c) => ({
+      id: c.confirmation_id,
+      agent: c.agent,
+      tool: c.tool,
+      args: c.args || {},
+      expiresAt: Date.now() + (c.timeout_seconds || 0) * 1000,
+      submitting: false,
+    });
 
     const handleMessage = (event) => {
       const payload = JSON.parse(event.data);
@@ -170,7 +182,11 @@ export function useConversationSocket({
               appendDraft(messages.filter((m) => m.id !== DRAFT_ID), current.draft, current.agent)
             );
           }
-          setProgress({ conversationId, state: progressFromSnapshot(current) });
+          let restored = progressFromSnapshot(current);
+          const pending = current.pending_confirmations || [];
+          if (pending.length) restored = progressReducer(restored, { status: "awaiting_approval", agent: current.agent });
+          setProgress({ conversationId, state: restored });
+          setConfirmations({ conversationId, items: pending.map(toCard) });
         }
         writeQueue(conversationId, () =>
           (data.queued || []).map((q) => ({ clientId: q.client_id, turnId: q.turn_id, content: q.content }))
@@ -225,6 +241,25 @@ export function useConversationSocket({
         return;
       }
 
+      if (payload.type === "tool_confirmation") {
+        setConfirmations((current) => ({
+          conversationId,
+          items: [...(current.conversationId === conversationId ? current.items : []).filter((c) => c.id !== data.confirmation_id), toCard(data)],
+        }));
+        step({ status: "awaiting_approval", agent: data.agent, tool: data.tool });
+        return;
+      }
+
+      if (payload.type === "tool_confirmation_resolved") {
+        setConfirmations((current) =>
+          current.conversationId !== conversationId
+            ? current
+            : { ...current, items: current.items.filter((c) => c.id !== data.confirmation_id) }
+        );
+        step({ status: "approval_resolved" });
+        return;
+      }
+
       if (payload.type === "agent_status") {
         setAgentStatus({ conversationId, status: data.status, agent: data.agent, tool: data.tool });
         step(data);
@@ -253,26 +288,37 @@ export function useConversationSocket({
 
       if (payload.type === "error") {
         setStatusMessage(payload.detail || "Failed to process the message.", "error");
+        if (payload.command) {
+          // A rejected COMMAND (the server echoes which one): undo exactly that.
+          // The reply being written is untouched.
+          if (payload.command === "send") {
+            const rejected = payload.client_id || unconfirmedRef.current.at(-1);
+            if (!rejected) return;
+            unconfirmedRef.current = unconfirmedRef.current.filter((id) => id !== rejected);
+            // Every send is a queued chip or the running bubble; if it wasn't in the
+            // queue, it was the turn we optimistically showed as running.
+            const wasChip = writeQueue(conversationId, (items) => items.filter((q) => q.clientId !== rejected))
+              .some((q) => q.clientId === rejected);
+            if (!wasChip) {
+              updateMessages(conversationId, (messages) => messages.filter((m) => m.clientId !== rejected));
+              finishTurn();
+            }
+          } else if (payload.command === "confirm") {
+            // Already answered / expired: the card is stale.
+            setConfirmations((current) =>
+              current.conversationId !== conversationId
+                ? current
+                : { ...current, items: current.items.filter((c) => c.id !== payload.confirmation_id) }
+            );
+          }
+          return; // stop / dequeue / unknown: the toast is enough
+        }
         if (payload.turn_id) {
           // A turn failed: drop its optimistic bubble and the draft, end the turn.
           flushNow();
           updateMessages(conversationId, (messages) =>
             messages.filter((m) => !(m.pending && (!payload.client_id || m.clientId === payload.client_id)) && m.id !== DRAFT_ID)
           );
-          finishTurn();
-          return;
-        }
-        // A rejected COMMAND (queue full, message too long, nothing to stop): the reply
-        // being written is fine. Undo only the newest send the server never accepted.
-        const rejected = unconfirmedRef.current.at(-1);
-        if (!rejected) return;
-        unconfirmedRef.current = unconfirmedRef.current.slice(0, -1);
-        // Every send is either a queued chip or the running bubble: if it wasn't in
-        // the queue, it was the turn we optimistically showed as running.
-        const wasChip = writeQueue(conversationId, (items) => items.filter((q) => q.clientId !== rejected))
-          .some((q) => q.clientId === rejected);
-        if (!wasChip) {
-          updateMessages(conversationId, (messages) => messages.filter((m) => m.clientId !== rejected));
           finishTurn();
         }
       }
@@ -369,7 +415,7 @@ export function useConversationSocket({
       JSON.stringify({
         content,
         client_id: clientId, // echoed back on every event of this turn
-        confirm_tools: false, // the confirmation UI comes with the next branch
+        confirm_tools: true, // this client can answer tool_confirmation events
         file_ids: attachedFileIds,
         selected_agent: selectedAgent || null, // explicit pick skips the router
         format: options.format || null, // ask the agent for a downloadable file
@@ -388,6 +434,21 @@ export function useConversationSocket({
   /** Stop the reply being written (the server keeps the partial answer). */
   const stop = () => sendCommand({ type: "stop" });
 
+  /** Answer a tool confirmation: approve | approve_all | reject | revise (+ feedback). */
+  const confirmTool = (confirmationId, decision, feedback = "") => {
+    setConfirmations((current) => ({
+      ...current,
+      items: current.items.map((c) => (c.id === confirmationId ? { ...c, submitting: true } : c)),
+    }));
+    if (!sendCommand({ type: "confirm", confirmation_id: confirmationId, decision, feedback })) {
+      setConfirmations((current) => ({
+        ...current,
+        items: current.items.map((c) => (c.id === confirmationId ? { ...c, submitting: false } : c)),
+      }));
+      setStatusMessage("Not connected right now. Try again in a moment.", "warning");
+    }
+  };
+
   /** Remove a queued message before it starts. */
   const removeQueued = (item) => {
     if (item.turnId) sendCommand({ type: "dequeue", turn_id: item.turnId });
@@ -405,6 +466,8 @@ export function useConversationSocket({
     agentStatus: agentStatus?.conversationId === selectedConversationId ? agentStatus : null,
     progress: progress.conversationId === selectedConversationId ? progress.state : null,
     queue: queue.conversationId === selectedConversationId ? queue.items : [],
+    confirmations: confirmations.conversationId === selectedConversationId ? confirmations.items : [],
+    confirmTool,
     removeQueued,
     stop,
     connectionState,

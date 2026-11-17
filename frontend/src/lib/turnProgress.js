@@ -7,7 +7,7 @@
  * ends - the same inference most chat UIs make.
  *
  * state: null (idle) | { steps: [{ key, kind, agent, tool, done }], waitingUntil }
- *   kind: routing | agent | tool | writing
+ *   kind: routing | agent | tool | approval | writing
  */
 
 const finishAll = (steps) => steps.map((s) => (s.done ? s : { ...s, done: true }));
@@ -32,6 +32,13 @@ export function progressReducer(state, event, now = Date.now()) {
     }
     case "writing":
       return push(state, { key: "writing", kind: "writing", agent: event.agent });
+    case "awaiting_approval": {
+      const count = (state?.steps || []).filter((s) => s.kind === "approval").length;
+      return push(state, { key: `approval:${count}`, kind: "approval", agent: event.agent, tool: event.tool });
+    }
+    case "approval_resolved":
+      // The user answered: tick the approval step (the tool then runs or is skipped).
+      return state && { ...state, steps: state.steps.map((s) => (s.kind === "approval" ? { ...s, done: true } : s)) };
     case "waiting":
       // Not a step: a temporary pause of the current one (rate limit), shown as a countdown.
       return { steps: state?.steps || [], waitingUntil: now + (event.seconds || 0) * 1000 };
@@ -53,5 +60,6 @@ export function stepLabel(step, labelFor) {
   if (step.kind === "routing") return "Choosing the best agent";
   if (step.kind === "agent") return `${labelFor(step.agent)} is on it`;
   if (step.kind === "tool") return `Using ${step.tool.replaceAll("_", " ")}`;
+  if (step.kind === "approval") return "Waiting for your approval";
   return "Writing the answer";
 }
