@@ -14,12 +14,22 @@ import {
   fetchConversationFiles,
   fetchMessages,
 } from "../lib/api";
-import { useConversationSocket } from "../hooks/useConversationSocket";
+import { DRAFT_ID, useConversationSocket } from "../hooks/useConversationSocket";
 import { useConversationUploads } from "../hooks/useConversationUploads";
 import { Brain, Menu } from "lucide-react";
 import Toaster from "../components/Toaster";
 import { useToasts } from "../hooks/useToasts";
 import { checkFiles } from "../lib/uploads";
+
+/**
+ * Saved messages from the server + what only exists locally: a draft restored from
+ * turn_state (which can arrive BEFORE this fetch finishes) and messages still being
+ * sent. Replacing the list wholesale used to wipe a live draft on page load.
+ */
+function withLocalMessages(saved, current) {
+  const local = current.filter((m) => (m.id === DRAFT_ID || m.pending) && !saved.some((s) => s.id === m.id));
+  return [...saved, ...local];
+}
 
 export default function ChatPage({ user, onLogout }) {
   // Pinned agent PER CONVERSATION (it used to be one global localStorage value,
@@ -79,16 +89,17 @@ export default function ChatPage({ user, onLogout }) {
   const resyncConversation = useCallback(async (conversationId) => {
     try {
       const latest = await fetchMessages(conversationId);
+      const saved = [...latest].sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
       setMessagesByConversation((current) => ({
         ...current,
-        [conversationId]: [...latest].sort((a, b) => new Date(a.created_at) - new Date(b.created_at)),
+        [conversationId]: withLocalMessages(saved, current[conversationId] || []),
       }));
     } catch {
       // Not fatal: the next successful load will catch up.
     }
   }, []);
 
-  const { agentStatus, connectionState, isSending, sendMessage } = useConversationSocket({
+  const { agentStatus, connectionState, isSending, progress, sendMessage } = useConversationSocket({
     selectedAgent: pinnedAgent,
     selectedConversationId,
     setMessagesByConversation,
@@ -182,7 +193,8 @@ export default function ChatPage({ user, onLogout }) {
             new Date(right.created_at).getTime()
         );
 
-        setConversationMessages(selectedConversationId, sorted);
+        // Merge, don't replace: turn_state may already have restored a live draft.
+        setConversationMessages(selectedConversationId, (current) => withLocalMessages(sorted, current));
       } catch (error) {
         if (!isMounted) {
           return;
@@ -548,6 +560,7 @@ export default function ChatPage({ user, onLogout }) {
         <ChatWindow
           activeAgent={activeAgent}
           agentStatus={agentStatus}
+          progress={progress}
           agents={agents}
           attachedFiles={attachedFiles}
           conversation={selectedConversation}

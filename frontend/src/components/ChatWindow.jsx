@@ -7,6 +7,7 @@ export default function ChatWindow({
   activeAgent,
   agentStatus,
   agents,
+  progress,
   attachedFiles,
   conversation,
   isLoading,
@@ -62,6 +63,7 @@ export default function ChatWindow({
       <MessageList
         agentStatus={agentStatus}
         agents={agents}
+        progress={progress}
         conversation={conversation}
         isLoading={isLoading}
         isSending={isSending}

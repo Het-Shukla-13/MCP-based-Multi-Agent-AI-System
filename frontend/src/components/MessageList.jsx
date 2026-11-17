@@ -1,7 +1,8 @@
-import { useEffect, useRef } from "react";
+import { Fragment, useEffect, useRef } from "react";
 import { CornerDownRight } from "lucide-react";
 import { generatedFileUrl } from "../lib/api";
-import { agentIcon, agentLabel, describeStatus } from "../lib/agents";
+import { agentIcon, agentLabel } from "../lib/agents";
+import ThinkingIndicator from "./ThinkingIndicator";
 import MarkdownMessage from "./MarkdownMessage";
 
 function formatTime(value) {
@@ -24,12 +25,12 @@ function renderContentWithLinks(content) {
   return parts;
 }
 
-export default function MessageList({ agentStatus, agents, conversation, isLoading, isSending, messages }) {
+export default function MessageList({ agentStatus, agents, conversation, isLoading, isSending, messages, progress }) {
   const endRef = useRef(null);
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
-  }, [messages, isSending, agentStatus]);
+  }, [messages, isSending, agentStatus, progress]);
 
   if (!conversation) {
     return (
@@ -81,7 +82,9 @@ export default function MessageList({ agentStatus, agents, conversation, isLoadi
         const switched = switchedAt.has(message.id);
 
         return (
-          <div className={`message-row message-row--${message.role}`} key={message.id}>
+          <Fragment key={message.id}>
+          {message.streaming && isSending ? <ThinkingIndicator agents={agents} progress={progress} /> : null}
+          <div className={`message-row message-row--${message.role}`}>
             {switched ? (
               <div className="agent-switch-banner" aria-live="polite">
                 <CornerDownRight aria-hidden="true" className="icon" size={14} />
@@ -93,6 +96,7 @@ export default function MessageList({ agentStatus, agents, conversation, isLoadi
                 "message",
                 `message--${message.role}`,
                 message.pending ? "message--pending" : "",
+                message.streaming ? "message--streaming" : "",
                 message.error ? "message--error" : "",
               ].join(" ")}
             >
@@ -104,7 +108,7 @@ export default function MessageList({ agentStatus, agents, conversation, isLoadi
               </div>
               <div className={`message-body${isAssistant ? " message-body--markdown" : ""}`}>
                 {isAssistant ? <MarkdownMessage content={message.content} /> : renderContentWithLinks(message.content)}
-                {message.streaming ? <span className="stream-cursor" aria-hidden="true">▍</span> : null}
+                {message.streaming && !message.content ? <span className="stream-cursor" aria-hidden="true" /> : null}
               </div>
               {message.files?.length ? (
                 <div className="message-files">
@@ -120,15 +124,11 @@ export default function MessageList({ agentStatus, agents, conversation, isLoadi
               ) : null}
             </article>
           </div>
+          </Fragment>
         );
       })}
 
-      {isSending && !isStreaming ? (
-        <div className="typing-indicator" aria-live="polite">{describeStatus(agents, agentStatus)}</div>
-      ) : null}
-      {isStreaming && agentStatus?.status === "tool" ? (
-        <div className="typing-indicator" aria-live="polite">{describeStatus(agents, agentStatus)}</div>
-      ) : null}
+      {isSending && !isStreaming ? <ThinkingIndicator agents={agents} progress={progress} /> : null}
 
       <div ref={endRef} />
     </div>
