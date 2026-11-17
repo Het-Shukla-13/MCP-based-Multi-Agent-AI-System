@@ -27,6 +27,15 @@ FORMATS = {
 }
 
 
+
+def file_stem(title: str) -> str:
+    """Slug for the filename. Models often pass "notes.md" as the title; drop a known
+    extension first so the file isn't named "notes-md.md"."""
+    stem, dot, ext = title.strip().rpartition(".")
+    if dot and stem and ext.lower() in FORMATS:
+        title = stem
+    return slugify(title)
+
 @mcp.tool()
 async def create_file(title: str, file_format: str, content: str, user_id: str = "", conversation_id: str = "") -> str:
     """Save content as a downloadable file. file_format: md, txt, json, csv or pdf.
@@ -53,7 +62,7 @@ async def create_file(title: str, file_format: str, content: str, user_id: str =
 
     data = render_markdown_pdf(title, content) if fmt == "pdf" else content.encode("utf-8")
     saved = await save_generated_file(
-        user_id, conversation_id, f"{filename_timestamp()}_{slugify(title)}.{fmt}", data, FORMATS[fmt]
+        user_id, conversation_id, f"{filename_timestamp()}_{file_stem(title)}.{fmt}", data, FORMATS[fmt]
     )
     return f"File created: {saved['filename']}\n{saved}"
 
@@ -81,7 +90,7 @@ async def create_from_template(template: str, title: str, fields: dict[str, str]
         return f"{exc}. Fix the fields and call create_from_template again."
     data = render_markdown_pdf("", markdown_text) if fmt == "pdf" else markdown_text.encode("utf-8")
     saved = await save_generated_file(
-        user_id, conversation_id, f"{filename_timestamp()}_{slugify(title)}.{fmt}", data, FORMATS[fmt]
+        user_id, conversation_id, f"{filename_timestamp()}_{file_stem(title)}.{fmt}", data, FORMATS[fmt]
     )
     return f"File created from template '{template}': {saved['filename']}\n{saved}"
 

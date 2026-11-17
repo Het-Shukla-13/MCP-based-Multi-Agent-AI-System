@@ -13,6 +13,12 @@ from google.genai.types import Content, Part
 from collections.abc import Awaitable, Callable
 from typing import Any
 
+from app.agent_layer.core.confirmation import (
+    current_confirmer,
+    needs_confirmation,
+    preview_args,
+    tool_response_for,
+)
 from app.agent_layer.schemas import AgentContext, AgentResponse
 from app.agent_layer.tools.mcp_registry import IDENTITY_ARGS, get_toolsets_for_agent
 from app.core.config import settings
@@ -228,12 +234,21 @@ class BaseAgent(ABC):
         """
         identity = {"user_id": context.user_id, "conversation_id": context.conversation_id}
 
-        def before_tool(tool, args: dict, tool_context):
+        async def before_tool(tool, args: dict, tool_context):
             for key in IDENTITY_ARGS:
                 if key in args or key in identity:
                     args[key] = identity[key]
             logger.info("Tool call | agent=%s | tool=%s | args=%s", self.name, tool.name,
                         {k: v for k, v in args.items() if k not in IDENTITY_ARGS})
+            # Side-effect tools wait for the user (approve / reject / revise) when a
+            # human is connected; the returned dict, if any, replaces the tool result.
+            confirmer = current_confirmer.get()
+            if confirmer is not None and needs_confirmation(tool.name):
+                call_id = getattr(tool_context, "function_call_id", None) or ""
+                decision = await confirmer(self.name, tool.name, preview_args(args, IDENTITY_ARGS), call_id)
+                logger.info("Tool confirmation | agent=%s | tool=%s | decision=%s",
+                            self.name, tool.name, decision.action)
+                return tool_response_for(tool.name, decision)
             return None  # None = proceed with the (patched) call
 
         return before_tool

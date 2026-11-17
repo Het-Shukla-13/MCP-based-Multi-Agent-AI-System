@@ -39,13 +39,17 @@ async def websocket_endpoint(websocket: WebSocket, conversation_id: UUID):
     here, so this loop keeps reading while a reply is being written.
 
     Client -> server:
-      {"content": "...", "file_ids": [...], "selected_agent": ..., "format": ..., "client_id": ...}
+      {"content": "...", "file_ids": [...], "selected_agent": ..., "format": ..., "client_id": ...,
+       "confirm_tools": true}           (opt in to approving create_file / generate_image)
                                          (no "type", or "type": "send") -> queue a turn
       {"type": "stop"}                   -> cancel the running turn (partial answer is kept)
       {"type": "dequeue", "turn_id": ..} -> remove a queued turn
+      {"type": "confirm", "confirmation_id": .., "decision": approve|approve_all|reject|revise,
+       "feedback": ".."}                -> answer a tool_confirmation
     Server -> client:
       turn_state (on connect: running turn + draft + queue), turn_queued, turn_started,
-      agent_status, chat_delta, chat (saved messages), turn_finished, error
+      agent_status, chat_delta, tool_confirmation, tool_confirmation_resolved,
+      chat (saved messages), turn_finished, error
     """
     # Browsers can't set headers on a WebSocket, so the access token comes as
     # ?token=. The user id is DERIVED from it; a client-supplied user_id is ignored.
@@ -80,11 +84,19 @@ async def websocket_endpoint(websocket: WebSocket, conversation_id: UUID):
                     stopped = await turn_runner.stop(conversation_id)
                     if not stopped:
                         await websocket.send_json({"type": "error", "detail": "Nothing is running."})
+                elif kind == "confirm":
+                    ok = await turn_runner.confirm(
+                        conversation_id, str(command.get("confirmation_id") or ""),
+                        str(command.get("decision") or ""), str(command.get("feedback") or ""))
+                    if not ok:
+                        await websocket.send_json({"type": "error", "detail": "That confirmation is no longer pending."})
                 elif kind == "dequeue":
                     await turn_runner.dequeue(conversation_id, UUID(str(command.get("turn_id"))))
                 elif kind == "send":
                     payload = {k: command.get(k) for k in ("content", "file_ids", "selected_agent", "format")}
                     payload["file_ids"] = [str(f) for f in (payload["file_ids"] or [])]
+                    # Client declares it can answer tool_confirmation events.
+                    payload["confirm_tools"] = command.get("confirm_tools") is True
                     client_id = command.get("client_id")
                     await turn_runner.submit(conversation_id, user_id, payload,
                                              client_id=str(client_id)[:64] if client_id else None)

@@ -1,3 +1,4 @@
+import asyncio
 from google.adk.agents.llm_agent import LlmAgent
 
 from app.agent_layer.agents.general_agent import GeneralAgent
@@ -54,7 +55,7 @@ def test_tool_identity_args_are_overwritten_with_request_identity():
     forged = {"user_id": "attacker", "conversation_id": "other-conv", "query": "secrets"}
     tool = type("T", (), {"name": "search_files"})()
 
-    result = request_agent.before_tool_callback(tool, forged, None)
+    result = asyncio.run(request_agent.before_tool_callback(tool, forged, None))
 
     assert result is None  # proceed with the call
     assert forged == {"user_id": "real-user", "conversation_id": "real-conv", "query": "secrets"}

@@ -25,6 +25,7 @@ class TurnMetric(SQLModel, table=True):
     ttft_ms: Optional[int] = Field(default=None, sa_column=Column(Integer, nullable=True))  # first streamed text
     context_ms: int = Field(default=0, sa_column=Column(Integer, nullable=False))  # memory + RAG assembly
     agent_ms: int = Field(default=0, sa_column=Column(Integer, nullable=False))  # router + agent + tools
+    confirm_ms: int = Field(default=0, sa_column=Column(Integer, nullable=False, server_default="0"))  # waiting for the user (excluded above)
     tool_calls: int = Field(default=0, sa_column=Column(Integer, nullable=False))
     tool_ms: int = Field(default=0, sa_column=Column(Integer, nullable=False))
     tools: list[dict[str, Any]] = Field(default_factory=list, sa_column=Column(JSON, nullable=False))
