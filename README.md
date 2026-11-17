@@ -135,22 +135,23 @@ sequenceDiagram
 **Prerequisites:** Docker, Python 3.12, [uv](https://docs.astral.sh/uv/), Node 20+. You also need free API keys from [Groq](https://console.groq.com/keys) and [Google AI Studio](https://aistudio.google.com/apikey).
 
 ```bash
-# 1. Database + Redis
-cp .env.example .env            # POSTGRES_* values
+# 1. Configuration: ONE file for everything (backend + docker-compose)
+cp backend/.env.example backend/.env   # set POSTGRES_PASSWORD, API keys, JWT_SECRET
+
+# 2. Database + Redis (reads POSTGRES_* from backend/.env)
 docker compose up -d            # Postgres+pgvector on :5433, Redis on :6379
 
-# 2. Backend
+# 3. Backend
 cd backend
-cp .env.example .env            # fill keys + JWT_SECRET (command is in the file)
 uv venv --python 3.12 .venv
 uv pip install --python .venv/bin/python -r requirements-dev.txt
 .venv/bin/alembic upgrade head
 .venv/bin/uvicorn main:app --reload --port 8000
 
-# 3. Background worker (only when FILE_PROCESSING_BACKEND="celery")
+# 4. Background worker (only when FILE_PROCESSING_BACKEND="celery")
 .venv/bin/celery -A app.core.celery_app.celery_app worker --pool=solo --loglevel=info
 
-# 4. Tests
+# 5. Tests
 .venv/bin/python -m pytest -q
 ```
 API docs: http://localhost:8000/docs. Click **Authorize** and paste the `access_token` from `/auth/login`. The MCP servers start automatically as child processes of the API.
