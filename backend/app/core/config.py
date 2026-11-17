@@ -3,7 +3,9 @@ from pathlib import Path
 import os
 
 from dotenv import load_dotenv
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from sqlalchemy.engine import URL
 
 
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
@@ -12,8 +14,18 @@ load_dotenv(str(ENV_FILE))
 
 class Settings(BaseSettings):
     APP_NAME:str="AI System"
-    DATABASE_URL_ASYNC: str
-    DATABASE_URL_SYNC: str
+    # --- Database ---
+    # ONE source of truth: these same POSTGRES_* values are read by docker-compose
+    # (env_file: backend/.env) to create the database, and used here to build the
+    # connection URLs, so the password is written exactly once.
+    POSTGRES_USER: str = "ai_user"
+    POSTGRES_PASSWORD: str
+    POSTGRES_DB: str = "ai_agent_db"
+    POSTGRES_HOST: str = "localhost"
+    POSTGRES_PORT: int = 5433  # docker-compose maps the container's 5432 to 5433
+    # Optional full overrides (e.g. a hosted database); built from the parts if empty.
+    DATABASE_URL_ASYNC: str | None = None
+    DATABASE_URL_SYNC: str | None = None
     ENV:str="dev"
     DB_ECHO: bool = False  # True prints every SQL statement (debugging only)
     # --- Auth ---
@@ -64,6 +76,24 @@ class Settings(BaseSettings):
     FILE_PROCESSING_BACKEND: str = "local"
     CELERY_BROKER_URL: str | None = None
     CELERY_RESULT_BACKEND: str | None = None
+
+    @model_validator(mode="after")
+    def _build_database_urls(self):
+        def url(driver: str) -> str:
+            # URL.create escapes special characters in the password (e.g. "@", "/"),
+            # which naive f-string formatting would break.
+            return URL.create(
+                drivername=driver,
+                username=self.POSTGRES_USER,
+                password=self.POSTGRES_PASSWORD,
+                host=self.POSTGRES_HOST,
+                port=self.POSTGRES_PORT,
+                database=self.POSTGRES_DB,
+            ).render_as_string(hide_password=False)
+
+        self.DATABASE_URL_ASYNC = self.DATABASE_URL_ASYNC or url("postgresql+asyncpg")
+        self.DATABASE_URL_SYNC = self.DATABASE_URL_SYNC or url("postgresql+psycopg2")
+        return self
 
     model_config = SettingsConfigDict(env_file=str(ENV_FILE), extra="ignore")
 

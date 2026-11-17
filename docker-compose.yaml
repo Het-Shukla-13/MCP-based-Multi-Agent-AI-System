@@ -3,10 +3,11 @@ services:
     image: pgvector/pgvector:pg16
     container_name: postgres-container
     restart: unless-stopped
-    environment:
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DB: ${POSTGRES_DB}
+    # Single config file for the whole project: the image reads POSTGRES_USER,
+    # POSTGRES_PASSWORD and POSTGRES_DB from it. Trade-off (local dev): the container
+    # also receives the file's other variables (API keys) it doesn't need.
+    env_file:
+      - ./backend/.env
     ports:
       - "5433:5432"
     volumes:

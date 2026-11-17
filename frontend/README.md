@@ -20,7 +20,8 @@ Prerequisites: Node 20+, and the backend running (see the [root README](../READM
 
 ```bash
 cd frontend
-cp .env.example .env        # VITE_API_BASE_URL=http://127.0.0.1:8000
+# Optional: cp .env.example .env  only if the backend is NOT on http://127.0.0.1:8000.
+# Never put secrets here: VITE_* values are baked into the JavaScript sent to browsers.
 npm ci
 npm run dev                 # http://localhost:5173
 ```
