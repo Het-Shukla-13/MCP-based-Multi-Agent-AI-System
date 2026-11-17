@@ -18,7 +18,7 @@ export default defineConfig({
   },
   projects: [
     { name: "desktop", use: { ...devices["Desktop Chrome"] }, testIgnore: /mobile\.spec/ },
-    { name: "mobile", use: { ...devices["iPhone 13"], browserName: "chromium" }, testMatch: /mobile\.spec/ },
+    { name: "mobile", use: { ...devices["iPhone 13"], browserName: "chromium" }, testMatch: /(mobile|visual)\.spec/ },
   ],
   webServer: {
     command: "npm run dev -- --port 5173 --strictPort",

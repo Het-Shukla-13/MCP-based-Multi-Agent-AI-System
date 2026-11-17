@@ -1,4 +1,5 @@
 import { useRef, useState } from "react";
+import ThemeToggle from "./ThemeToggle";
 
 function formatConversationDate(value) {
   if (!value) return "New";
@@ -119,7 +120,10 @@ export default function Sidebar({
 
       <div className="sidebar__account">
         <span className="sidebar__email" title={user?.email}>{user?.email}</span>
-        <button className="link-button" onClick={onLogout} type="button">Sign out</button>
+        <div className="sidebar__account-actions">
+          <ThemeToggle />
+          <button className="link-button" onClick={onLogout} type="button">Sign out</button>
+        </div>
       </div>
     </aside>
   );
