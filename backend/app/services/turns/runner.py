@@ -30,7 +30,11 @@ import logging
 from collections import deque
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Protocol
+from time import perf_counter
 from uuid import UUID, uuid4
+
+from app.agent_layer.core.confirmation import ACTIONS, MAX_FEEDBACK_CHARS, Decision, current_confirmer
+from app.services.metrics.collector import current_turn
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +43,7 @@ HEARTBEAT_SECONDS = 10
 STALE_AFTER_SECONDS = 45
 SWEEP_EVERY_SECONDS = 60
 MAX_CONTENT_CHARS = 20_000
+CONFIRMATION_TIMEOUT_SECONDS = 600  # unanswered -> treated as rejected, the turn moves on
 
 Broadcast = Callable[[UUID, dict], Awaitable[None]]
 Emit = Callable[[dict], Awaitable[None]]
@@ -57,6 +62,10 @@ class LiveTurn:
     draft: str = ""  # streamed text so far: replayed on reconnect, saved on Stop
     user_message_id: UUID | None = None
     task: asyncio.Task | None = field(default=None, repr=False)
+    # Tool calls waiting for the user: confirmation_id -> public info / future.
+    pending: dict[str, dict] = field(default_factory=dict)
+    waiters: dict[str, asyncio.Future] = field(default_factory=dict, repr=False)
+    approve_all: bool = False  # "approve all" for the rest of this turn
 
     def public(self) -> dict:
         return {
@@ -68,6 +77,7 @@ class LiveTurn:
             "phase": self.phase,
             "draft": self.draft,
             "user_message_id": str(self.user_message_id) if self.user_message_id else None,
+            "pending_confirmations": list(self.pending.values()),
         }
 
 
@@ -148,6 +158,24 @@ class TurnRunner:
         lane.current.task.cancel()
         return True
 
+    async def confirm(self, conversation_id: UUID, confirmation_id: str, action: str,
+                      feedback: str = "") -> bool:
+        """Deliver the user's decision for a pending tool call of the running turn."""
+        if action not in ACTIONS:
+            raise ValueError(f"Unknown decision: {action}")
+        feedback = (feedback or "").strip()
+        if action == "revise" and not feedback:
+            raise ValueError("Say what should change.")
+        if len(feedback) > MAX_FEEDBACK_CHARS:
+            raise ValueError(f"Feedback is too long (max {MAX_FEEDBACK_CHARS} characters).")
+        lane = self._lanes.get(conversation_id)
+        turn = lane.current if lane else None
+        waiter = turn.waiters.get(confirmation_id) if turn else None
+        if waiter is None or waiter.done():
+            return False  # unknown, already answered, or expired
+        waiter.set_result(Decision(action, feedback))
+        return True
+
     async def dequeue(self, conversation_id: UUID, turn_id: UUID) -> bool:
         lane = self._lanes.get(conversation_id)
         if not lane:
@@ -217,7 +245,16 @@ class TurnRunner:
         async def emit(event: dict) -> None:
             await self._on_event(turn, event)
 
-        turn.task = asyncio.create_task(self.executor.execute(turn, emit))
+        async def execute() -> dict:
+            # Published in the turn task's context: the agent's tool callback finds
+            # it there and asks this turn's user before side-effect tools run.
+            # Opt-in per message: a client that can't render confirmations (older UI)
+            # would otherwise leave the turn waiting until the timeout.
+            if turn.payload.get("confirm_tools"):
+                current_confirmer.set(lambda agent, tool, args, call_id: self._ask(turn, agent, tool, args, call_id))
+            return await self.executor.execute(turn, emit)
+
+        turn.task = asyncio.create_task(execute())
         # asyncio.wait never raises: cancelling turn.task must not cancel the lane worker.
         await asyncio.wait({turn.task})
 
@@ -245,6 +282,34 @@ class TurnRunner:
             await self._send(turn, "chat", chat)
             await self.store.finish(turn, "done", _ai_id(chat), None)
         await self._send(turn, "turn_finished", {"status": turn.status})
+
+    async def _ask(self, turn: LiveTurn, agent: str, tool: str, args: dict, call_id: str) -> Decision:
+        if turn.approve_all:
+            return Decision("approve")
+        confirmation_id = uuid4().hex
+        info = {"confirmation_id": confirmation_id, "agent": agent, "tool": tool, "args": args,
+                "timeout_seconds": CONFIRMATION_TIMEOUT_SECONDS}
+        waiter = asyncio.get_running_loop().create_future()
+        turn.pending[confirmation_id], turn.waiters[confirmation_id] = info, waiter
+        previous_phase, turn.phase = turn.phase, "awaiting_confirmation"
+        await self._send(turn, "tool_confirmation", info)
+        started = perf_counter()
+        try:
+            decision = await asyncio.wait_for(waiter, CONFIRMATION_TIMEOUT_SECONDS)
+        except TimeoutError:
+            decision = Decision("expired")
+        finally:
+            turn.pending.pop(confirmation_id, None)
+            turn.waiters.pop(confirmation_id, None)
+            turn.phase = previous_phase
+            collector = current_turn.get()
+            if collector is not None:
+                collector.add_confirmation_wait(call_id, int((perf_counter() - started) * 1000))
+        if decision.action == "approve_all":
+            turn.approve_all = True
+        await self._send(turn, "tool_confirmation_resolved",
+                         {"confirmation_id": confirmation_id, "decision": decision.action})
+        return decision
 
     async def _on_event(self, turn: LiveTurn, event: dict) -> None:
         status = event.get("status")

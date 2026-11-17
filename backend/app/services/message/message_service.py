@@ -355,7 +355,7 @@ async def _send_message(
         answered_by = exc.agent_name
         ai_content = AGENT_ERROR_REPLY
     
-    collector.agent_ms = int((perf_counter() - ai_response_started_at) * 1000)
+    collector.agent_ms = max(0, int((perf_counter() - ai_response_started_at) * 1000) - collector.confirm_ms)
     logger.info(
             "Chat timing | stage=generate_ai_response | duration_min={}",
             elapsed_minutes(ai_response_started_at),

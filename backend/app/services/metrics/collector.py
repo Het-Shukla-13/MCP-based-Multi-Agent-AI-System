@@ -31,6 +31,11 @@ class TurnCollector:
     input_tokens: int = 0
     output_tokens: int = 0
     fallback_used: bool = False
+    # Time spent waiting for the user to approve a tool. Excluded from latency
+    # numbers (they measure the system, not how fast the user clicks).
+    confirm_ms: int = 0
+    _confirm_ms_at_first_token: int = 0
+    _tool_wait_ms: dict[str, int] = field(default_factory=dict)
     tools: list[dict[str, Any]] = field(default_factory=list)
     _open_tools: dict[str, tuple[float, dict]] = field(default_factory=dict)
 
@@ -38,6 +43,12 @@ class TurnCollector:
     def mark_first_token(self) -> None:
         if self.first_token_at is None:
             self.first_token_at = perf_counter()
+            self._confirm_ms_at_first_token = self.confirm_ms
+
+    def add_confirmation_wait(self, call_id: str, ms: int) -> None:
+        self.confirm_ms += ms
+        if call_id:
+            self._tool_wait_ms[call_id] = self._tool_wait_ms.get(call_id, 0) + ms
 
     def tool_started(self, call_id: str, name: str, args: dict | None) -> None:
         self._open_tools[call_id] = (perf_counter(), {"tool": name, "args": redact_args(args or {})})
@@ -45,6 +56,8 @@ class TurnCollector:
     def tool_finished(self, call_id: str, name: str, ok: bool) -> None:
         started, info = self._open_tools.pop(call_id, (None, {"tool": name, "args": {}}))
         ms = int((perf_counter() - started) * 1000) if started else None
+        if ms is not None:
+            ms = max(0, ms - self._tool_wait_ms.pop(call_id, 0))
         self.tools.append({**info, "ms": ms, "ok": ok})
 
     def record_llm(self, *, purpose: str, model: str, input_tokens: int, output_tokens: int,
@@ -66,8 +79,10 @@ class TurnCollector:
             "message_id": message_id,
             "agent_name": agent_name,
             "mode": self.mode,
-            "total_ms": int((now - self.started) * 1000),
-            "ttft_ms": int((self.first_token_at - self.started) * 1000) if self.first_token_at else None,
+            "total_ms": max(0, int((now - self.started) * 1000) - self.confirm_ms),
+            "ttft_ms": (max(0, int((self.first_token_at - self.started) * 1000) - self._confirm_ms_at_first_token)
+                        if self.first_token_at else None),
+            "confirm_ms": self.confirm_ms,
             "context_ms": self.context_ms,
             "agent_ms": self.agent_ms,
             "tool_calls": len(self.tools),

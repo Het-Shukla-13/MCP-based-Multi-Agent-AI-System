@@ -33,3 +33,11 @@ def test_every_template_renders_with_required_fields():
     for name, t in TEMPLATES.items():
         md = render_template(name, "T", {f: f"value-{f}" for f in t.required})
         assert all(f"value-{f}" in md for f in t.required), name
+
+
+def test_title_with_extension_is_not_doubled():
+    from app.mcp_servers.artifacts_server import file_stem
+
+    assert file_stem("green-tea.md") == "green-tea"
+    assert file_stem("Report.PDF") == file_stem("Report")
+    assert file_stem("v1.2 release notes") == file_stem("v1.2 release notes")  # not an extension
