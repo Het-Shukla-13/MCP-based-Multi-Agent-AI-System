@@ -68,3 +68,26 @@ for (const theme of ["light", "dark"]) {
     }
   });
 }
+
+for (const theme of ["light", "dark"]) {
+  test(`@visual confirmation card (${theme})`, async ({ page }, testInfo) => {
+    const { fakeChatServer } = await import("./fakeChatServer");
+    const { newChat } = await import("./helpers");
+    const server = await fakeChatServer(page);
+    await page.addInitScript((t) => window.localStorage.setItem("theme", t), theme);
+    await register(page);
+    await newChat(page);
+    await page.getByLabel("Chat message input").fill("Make me a short note about green tea as a file");
+    await page.getByRole("button", { name: "Send" }).click();
+    const sent = await server.next((c) => c.content);
+    server.send("turn_started", { turn_id: "t1", client_id: sent.client_id });
+    server.send("agent_status", { status: "working", agent: "document" });
+    server.send("agent_status", { status: "tool", agent: "document", tool: "create_file" });
+    server.send("tool_confirmation", {
+      confirmation_id: "k1", agent: "document", tool: "create_file", timeout_seconds: 600,
+      args: { title: "green-tea.md", file_format: "md", content: "# Green tea\n- antioxidants\n- calm focus" },
+    });
+    await expect(page.locator(".confirm-card")).toBeVisible();
+    await shoot(page, `${testInfo.project.name}-${theme}-confirmation`);
+  });
+}

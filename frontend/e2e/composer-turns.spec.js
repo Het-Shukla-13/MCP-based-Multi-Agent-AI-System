@@ -105,9 +105,9 @@ test("a rejected command (queue full) removes only that chip, the stream continu
 
   await input(page).fill("One too many");
   await page.getByRole("button", { name: "Queue", exact: true }).click();
-  await server.next((c) => c.content === "One too many");
-  // Same shape as the backend: detail at the top level, and no turn_id (a rejected command).
-  server.raw({ type: "error", detail: "5 messages are already waiting in this conversation." });
+  const rejected = await server.next((c) => c.content === "One too many");
+  // Same shape as the backend: a rejected command echoes its type and client_id.
+  server.raw({ type: "error", detail: "5 messages are already waiting in this conversation.", command: "send", client_id: rejected.client_id });
 
   await expect(page.locator(".toast", { hasText: "already waiting" })).toBeVisible();
   await expect(page.locator(".composer-queue__item")).toHaveCount(0);
@@ -169,9 +169,9 @@ test("a rejected FIRST message removes its bubble and ends the sending state", a
 
   await input(page).fill("This one gets rejected");
   await page.getByRole("button", { name: "Send" }).click();
-  await server.next((c) => c.content);
+  const sent = await server.next((c) => c.content);
   await expect(page.getByRole("button", { name: "Stop" })).toBeVisible(); // optimistic: shown as running
-  server.raw({ type: "error", detail: "Message is too long (max 20000 characters)." });
+  server.raw({ type: "error", detail: "Message is too long (max 20000 characters).", command: "send", client_id: sent.client_id });
 
   await expect(page.locator(".toast", { hasText: "too long" })).toBeVisible();
   await expect(page.locator(".message--user")).toHaveCount(0);

@@ -2,6 +2,7 @@ import { Fragment, useLayoutEffect, useRef, useState } from "react";
 import { ArrowDown, CornerDownRight } from "lucide-react";
 import { generatedFileUrl } from "../lib/api";
 import { agentIcon, agentLabel } from "../lib/agents";
+import ConfirmationCard from "./ConfirmationCard";
 import ThinkingIndicator from "./ThinkingIndicator";
 import MarkdownMessage from "./MarkdownMessage";
 
@@ -25,7 +26,17 @@ function renderContentWithLinks(content) {
   return parts;
 }
 
-export default function MessageList({ agentStatus, agents, conversation, isLoading, isSending, messages, progress }) {
+export default function MessageList({
+  agentStatus,
+  agents,
+  confirmations = [],
+  conversation,
+  isLoading,
+  isSending,
+  messages,
+  onConfirmTool,
+  progress,
+}) {
   const listRef = useRef(null);
   const stickRef = useRef(true); // follow new content only while the user is at the bottom
   const conversationRef = useRef(null);
@@ -53,7 +64,7 @@ export default function MessageList({ agentStatus, agents, conversation, isLoadi
     const justSent = last?.role === "user" && last?.pending;
     // Instant, not smooth: smooth scrolling lags behind a fast stream.
     if (switched || justSent || stickRef.current) scrollToBottom(false);
-  }, [messages, isSending, agentStatus, progress, conversation?.id]);
+  }, [messages, isSending, agentStatus, progress, confirmations, conversation?.id]);
 
   if (!conversation) {
     return (
@@ -160,6 +171,9 @@ export default function MessageList({ agentStatus, agents, conversation, isLoadi
       })}
 
       {isSending && !isStreaming ? <ThinkingIndicator agents={agents} progress={progress} /> : null}
+      {confirmations.map((confirmation) => (
+        <ConfirmationCard agents={agents} confirmation={confirmation} key={confirmation.id} onDecide={onConfirmTool} />
+      ))}
 
     </div>
     {isAtBottom ? null : (
