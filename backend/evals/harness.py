@@ -8,6 +8,7 @@ Runs eval suites against the REAL agents, MCP tools and database (free-tier mode
 """
 
 import asyncio
+import hashlib
 import shutil
 import uuid
 from pathlib import Path
@@ -41,8 +42,25 @@ Score each 1-5:
 Return ONLY JSON: {"correctness": n, "grounding": n, "format": n, "reason": "one sentence"}"""
 
 
+def fixtures_fingerprint(fixtures: Path) -> str:
+    """Changes when any fixture file (name or bytes) or the chunking code changes."""
+    digest = hashlib.sha256()
+    for path in sorted(p for p in fixtures.iterdir() if p.is_file()):
+        digest.update(path.name.encode() + b"\0" + path.read_bytes())
+    for module in ("hierarchy.py", "file_chunkers.py", "file_ingestion.py"):
+        digest.update((BACKEND_ROOT / "app/services/file_processing" / module).read_bytes())
+    return digest.hexdigest()[:16]
+
+
 async def setup_workspace(fixtures: Path = FIXTURES) -> tuple[str, str]:
-    """Eval user + a fresh conversation with the fixture files ingested."""
+    """
+    Eval user + a conversation with the fixture files ingested.
+
+    Reused when the fixtures and the chunking code are unchanged: ingestion
+    embeds every chunk, and re-embedding ~200 chunks per run used up the free
+    tier's DAILY embedding quota in one afternoon of A/B runs.
+    """
+    title = f"eval workspace {fixtures.name} {fixtures_fingerprint(fixtures)}"
     async with AsyncSessionLocal() as db:
         user = (await db.execute(select(User).where(User.email == EVAL_EMAIL))).scalar_one_or_none()
         if user is None:
@@ -50,7 +68,13 @@ async def setup_workspace(fixtures: Path = FIXTURES) -> tuple[str, str]:
             db.add(user)
             await db.commit()
             await db.refresh(user)
-        conversation = Conversation(title="eval run", user_id=user.id)
+        expected = sum(1 for p in fixtures.iterdir() if p.is_file())
+        for existing in (await db.execute(select(Conversation).where(
+                Conversation.user_id == user.id, Conversation.title == title))).scalars():
+            statuses = (await db.execute(select(File.status).where(File.conversation_id == existing.id))).scalars().all()
+            if len(statuses) == expected and all(s == "processed" for s in statuses):
+                return str(user.id), str(existing.id)
+        conversation = Conversation(title=title, user_id=user.id)
         db.add(conversation)
         await db.commit()
         await db.refresh(conversation)

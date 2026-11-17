@@ -426,7 +426,12 @@ async def search_memories_with_scores(
     conversation_id: UUID | None = None,
     only_active: bool = True,
 ) -> list[dict]:
-    query_embedding = await embed_text_async(query_text, task="query")
+    try:
+        query_embedding = await embed_text_async(query_text, task="query")
+    except Exception as exc:
+        # Memory is an enhancement: an embedding outage/quota must not fail the turn.
+        logger.warning("Memory search skipped: query embedding failed | error={}", str(exc)[:200])
+        return []
 
     raw_results = await find_similar_memory(
         db,
