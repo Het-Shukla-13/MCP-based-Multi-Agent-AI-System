@@ -1,0 +1,24 @@
+{"id": "r01", "message": "hi! how are you today?", "expected": ["general"]}
+{"id": "r02", "message": "Tell me a fun fact about octopuses.", "expected": ["general", "research"]}
+{"id": "r03", "message": "Explain the difference between TCP and UDP in simple words.", "expected": ["general", "research"]}
+{"id": "r04", "message": "Write a Python function that checks whether a number is prime.", "expected": ["code"]}
+{"id": "r05", "message": "Why does my JavaScript code say 'undefined is not a function'?", "expected": ["code"]}
+{"id": "r06", "message": "Review this SQL for performance: SELECT * FROM orders WHERE YEAR(created_at)=2024", "expected": ["code", "data"]}
+{"id": "r07", "message": "Refactor this class to use dependency injection.", "expected": ["code"]}
+{"id": "r08", "message": "In my sales.csv, which region had the highest revenue?", "expected": ["data"]}
+{"id": "r09", "message": "Compute the average and median of the price column in my spreadsheet.", "expected": ["data"]}
+{"id": "r10", "message": "Is there a correlation between units and revenue in the data I uploaded?", "expected": ["data"]}
+{"id": "r11", "message": "What is the latest stable version of Python and when was it released?", "expected": ["research"]}
+{"id": "r12", "message": "Find recent news about open-source LLMs and cite sources.", "expected": ["research"]}
+{"id": "r13", "message": "Compare PostgreSQL and MongoDB for a chat application, with sources.", "expected": ["research"]}
+{"id": "r14", "message": "Summarize the PDF report I uploaded.", "expected": ["document"]}
+{"id": "r15", "message": "What does section 3 of my contract.docx say about termination?", "expected": ["document"]}
+{"id": "r16", "message": "List the headings in the document I attached.", "expected": ["document"]}
+{"id": "r17", "message": "What is written in the screenshot I uploaded?", "expected": ["image"]}
+{"id": "r18", "message": "Draw a watercolor painting of a lighthouse at sunset.", "expected": ["image"]}
+{"id": "r19", "message": "Generate an image of a robot reading a book.", "expected": ["image"]}
+{"id": "r20", "message": "My email is het@code.dev, please remember it.", "expected": ["general"], "note": "e-mail must not look like an @mention"}
+{"id": "r21", "message": "@data show me the columns of sales.csv", "expected": ["data"], "note": "explicit mention"}
+{"id": "r22", "message": "@research what is pgvector?", "expected": ["research"], "note": "explicit mention"}
+{"id": "r23", "message": "thanks, that's all for now", "expected": ["general"]}
+{"id": "r24", "message": "Create a PDF report summarizing what we discussed.", "expected": ["general", "document"]}

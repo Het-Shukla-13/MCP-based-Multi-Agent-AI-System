@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+import asyncio
 import logging
 import re
 from time import perf_counter
@@ -12,9 +13,17 @@ from google.genai.types import Content, Part
 from collections.abc import Awaitable, Callable
 from typing import Any
 
+from app.agent_layer.core.confirmation import (
+    current_confirmer,
+    needs_confirmation,
+    preview_args,
+    tool_response_for,
+)
+from app.agent_layer.core.tool_scheduler import ToolScheduler, is_write
 from app.agent_layer.schemas import AgentContext, AgentResponse
 from app.agent_layer.tools.mcp_registry import IDENTITY_ARGS, get_toolsets_for_agent
 from app.core.config import settings
+from app.services.metrics.collector import current_turn, observe_adk_event
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +33,33 @@ StatusCallback = Callable[[dict], Awaitable[None]]
 
 _RETRYABLE_MARKERS = ("429", "resource_exhausted", "quota", "500", "503", "unavailable",
                       "overloaded", "high demand", "internal error", "deadline")
+
+
+MAX_QUOTA_WAIT_SECONDS = 20.0
+
+
+def quota_retry_delay(exc: Exception) -> float | None:
+    """
+    For a rate-limit (429 / RESOURCE_EXHAUSTED) error, the delay the provider asks for,
+    e.g. "'retryDelay': '12s'" or "retry in 12.3s". None if not a rate limit.
+    Free tiers limit requests PER MINUTE, so a short wait usually succeeds.
+    """
+    text = str(exc)
+    if "429" not in text and "resource_exhausted" not in text.lower():
+        return None
+    match = re.search(r"retryDelay'?\"?:\s*'?\"?(\d+(?:\.\d+)?)s", text) or re.search(r"retry in (\d+(?:\.\d+)?)\s*s", text, re.I)
+    return float(match.group(1)) + 0.5 if match else 10.0
+
+
+async def wait_for_quota(exc: Exception, on_status: "StatusCallback | None", agent: str) -> bool:
+    """Wait out a short rate-limit window (telling the UI). False if not worth waiting."""
+    delay = quota_retry_delay(exc)
+    if delay is None or delay > MAX_QUOTA_WAIT_SECONDS:
+        return False
+    logger.warning("All models rate-limited; waiting %.1fs before one retry", delay)
+    await emit_status(on_status, {"status": "waiting", "agent": agent, "seconds": round(delay)})
+    await asyncio.sleep(delay)
+    return True
 
 
 def is_retryable_provider_error(exc: Exception) -> bool:
@@ -187,27 +223,60 @@ class BaseAgent(ABC):
 
         # MCP tools for this agent (least-privilege view of shared servers).
         adk_agent.tools = list(get_toolsets_for_agent(self.name))
-        adk_agent.before_tool_callback = self._identity_injector(context)
+        (adk_agent.before_tool_callback,
+         adk_agent.after_tool_callback,
+         adk_agent.on_tool_error_callback) = self._tool_callbacks(context)
         adk_agent.before_model_callback = strip_routing_context
         return adk_agent
 
-    def _identity_injector(self, context: AgentContext):
+    def _tool_callbacks(self, context: AgentContext):
         """
-        Never trust identifiers chosen by the model: a prompt-injected document could
-        ask a tool to read another user's files. Overwrite them with the real request
-        identity before EVERY tool call.
+        before/after/on_error tool callbacks sharing one per-request ToolScheduler.
+
+        before: 1) identity  2) schedule (reads concurrent, writes exclusive and
+        after the step's reads)  3) confirmation for side-effect tools.
+        after / on_error: release the schedule slot (idempotent per call).
         """
         identity = {"user_id": context.user_id, "conversation_id": context.conversation_id}
+        scheduler = ToolScheduler()
 
-        def before_tool(tool, args: dict, tool_context):
+        def call_key(tool_context) -> str:
+            return getattr(tool_context, "function_call_id", None) or f"ctx-{id(tool_context)}"
+
+        async def before_tool(tool, args: dict, tool_context):
+            # Never trust identifiers chosen by the model: a prompt-injected document
+            # could ask a tool to read another user's files.
             for key in IDENTITY_ARGS:
                 if key in args or key in identity:
                     args[key] = identity[key]
             logger.info("Tool call | agent=%s | tool=%s | args=%s", self.name, tool.name,
                         {k: v for k, v in args.items() if k not in IDENTITY_ARGS})
+            key = call_key(tool_context)
+            await scheduler.acquire(key, write=is_write(tool.name))
+            try:
+                # Side-effect tools wait for the user (approve / reject / revise) when a
+                # human is connected; the returned dict, if any, replaces the tool result.
+                confirmer = current_confirmer.get()
+                if confirmer is not None and needs_confirmation(tool.name):
+                    decision = await confirmer(self.name, tool.name, preview_args(args, IDENTITY_ARGS),
+                                               getattr(tool_context, "function_call_id", None) or "")
+                    logger.info("Tool confirmation | agent=%s | tool=%s | decision=%s",
+                                self.name, tool.name, decision.action)
+                    return tool_response_for(tool.name, decision)
+            except BaseException:  # cancelled (Stop) while waiting: free the slot
+                await scheduler.release(key)
+                raise
             return None  # None = proceed with the (patched) call
 
-        return before_tool
+        async def after_tool(tool, args: dict, tool_context, tool_response):
+            await scheduler.release(call_key(tool_context))
+            return None  # keep the tool's response unchanged
+
+        async def on_tool_error(tool, args: dict, tool_context, error):
+            await scheduler.release(call_key(tool_context))
+            return None  # ADK re-raises; the agent's own error handling applies
+
+        return before_tool, after_tool, on_tool_error
 
 
     async def _run_with_model(
@@ -243,6 +312,7 @@ class BaseAgent(ABC):
             new_message=Content(role="user", parts=[Part.from_text(text=prompt)]),
             run_config=run_config(),
         ):
+            observe_adk_event(event, model)  # metrics: tokens, tool timings, first token
             await emit_tool_events(on_status, event)
             await emit_text_delta(on_status, event)
             if generated_files is not None:
@@ -279,9 +349,20 @@ class BaseAgent(ABC):
                 "Agent '%s' failed on '%s' (retryable). Falling back to '%s'. error=%s",
                 self.name, primary_model, fallback_model, primary_exc,
             )
+            turn = current_turn.get()
+            if turn is not None:
+                turn.fallback_used = True
             # Fallback uses its own fresh agent object; nothing shared is mutated.
             generated = []
-            final_text = await self._run_with_model(context, prompt, fallback_model, on_status, generated)
+            try:
+                final_text = await self._run_with_model(context, prompt, fallback_model, on_status, generated)
+            except Exception as fallback_exc:
+                # Both models rate-limited in the same minute: wait the provider's
+                # suggested delay (if short) and retry the fallback once.
+                if not await wait_for_quota(fallback_exc, on_status, self.name):
+                    raise
+                generated = []
+                final_text = await self._run_with_model(context, prompt, fallback_model, on_status, generated)
 
         return AgentResponse(
             content=final_text.strip(),

@@ -1,3 +1,6 @@
+import json
+
+from sqlalchemy import text
 from sqlalchemy.future import select
 from sqlalchemy.orm import selectinload
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -101,4 +104,42 @@ async def update_conversation_metadata(
 async def delete_conversation(db: AsyncSession, conversation_id: UUID) -> None:
     conversation = await get_conversation(db, conversation_id)
     await db.delete(conversation)
+    await db.commit()
+
+
+async def patch_conversation_metadata(
+    db: AsyncSession,
+    conversation_id: UUID,
+    patch: dict,
+    *,
+    under: str | None = None,
+) -> None:
+    """
+    Atomic JSONB merge done by Postgres, instead of read-modify-write in Python.
+
+    The chat turn and background jobs (summary, topics, profile) all write
+    convo_metadata. Writing the whole dict from a copy read earlier silently
+    overwrote whatever the other side wrote in between (lost update). Here each
+    writer only sends the keys it owns:
+      under=None   -> top-level keys:          metadata || patch
+      under="stm"  -> keys inside metadata.stm: jsonb_set(metadata, '{stm}', stm || patch)
+    """
+    payload = json.dumps(patch, default=str)
+    # A new conversation stores JSON `null` (a jsonb scalar, not SQL NULL), which
+    # COALESCE doesn't replace and jsonb_set rejects: treat any non-object as {}.
+    base = "CASE WHEN jsonb_typeof(convo_metadata) = 'object' THEN convo_metadata ELSE '{}'::jsonb END"
+    if under is None:
+        statement = text(
+            f"UPDATE conversation SET convo_metadata = {base} || CAST(:patch AS jsonb), "
+            "updated_at = now() AT TIME ZONE 'utc' WHERE id = :id"
+        ).bindparams(patch=payload, id=conversation_id)
+    else:
+        inner = ("CASE WHEN jsonb_typeof(convo_metadata -> :key) = 'object' "
+                 "THEN convo_metadata -> :key ELSE '{}'::jsonb END")
+        statement = text(
+            f"UPDATE conversation SET convo_metadata = jsonb_set({base}, ARRAY[:key], "
+            f"{inner} || CAST(:patch AS jsonb), true), "
+            "updated_at = now() AT TIME ZONE 'utc' WHERE id = :id"
+        ).bindparams(patch=payload, key=under, id=conversation_id)
+    await db.execute(statement)
     await db.commit()

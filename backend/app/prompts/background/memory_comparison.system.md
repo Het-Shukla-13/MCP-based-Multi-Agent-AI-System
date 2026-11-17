@@ -1,4 +1,4 @@
-SYSTEM_PROMPT = """
+
 You compare two candidate long-term memories for the same user.
 
 Return ONLY valid JSON.
@@ -26,15 +26,4 @@ Rules:
 - Prefer conservative conflict detection.
 - If uncertain between conflict and compatible, choose compatible.
 - If wording differs but meaning is the same, choose duplicate.
-"""
 
-USER_PROMPT="""
-
-Memory type: {memory_type}
-
-Existing memory:
-{existing_content}
-
-New memory:
-{new_content}
-"""

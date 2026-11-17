@@ -1,3 +1,4 @@
+import asyncio
 from google.adk.agents.llm_agent import LlmAgent
 
 from app.agent_layer.agents.general_agent import GeneralAgent
@@ -54,7 +55,7 @@ def test_tool_identity_args_are_overwritten_with_request_identity():
     forged = {"user_id": "attacker", "conversation_id": "other-conv", "query": "secrets"}
     tool = type("T", (), {"name": "search_files"})()
 
-    result = request_agent.before_tool_callback(tool, forged, None)
+    result = asyncio.run(request_agent.before_tool_callback(tool, forged, None))
 
     assert result is None  # proceed with the call
     assert forged == {"user_id": "real-user", "conversation_id": "real-conv", "query": "secrets"}
@@ -83,3 +84,13 @@ def test_routing_bookkeeping_turns_are_removed_from_sub_agent_input():
     strip_routing_context(None, request)
     assert [[p.text for p in c.parts][0] for c in request.contents] == ["Say hi", "For context:"]
     assert "transfer_to_agent" not in str([p.text for c in request.contents for p in c.parts])
+
+
+def test_quota_retry_delay_parses_provider_hint():
+    from app.agent_layer.core.base import quota_retry_delay
+
+    assert quota_retry_delay(Exception("429 RESOURCE_EXHAUSTED {'retryDelay': '12s'}")) == 12.5
+    assert quota_retry_delay(Exception("Rate limited, please retry in 3.2 s")) is None  # no 429 marker
+    assert quota_retry_delay(Exception("429 Too Many Requests, retry in 3.2s")) == 3.7
+    assert quota_retry_delay(Exception("429 RESOURCE_EXHAUSTED")) == 10.0  # no hint: default
+    assert quota_retry_delay(Exception("503 UNAVAILABLE")) is None

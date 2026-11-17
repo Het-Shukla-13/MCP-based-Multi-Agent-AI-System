@@ -1,53 +1,50 @@
+"""
+Retrieval over the user's uploaded files: hybrid search over child chunks,
+answered with their parent passages.
+
+1. Candidates, two ways (children only):
+   - vector: cosine distance on the HNSW index (meaning, paraphrases);
+   - keyword: Postgres full-text search on chunk.search_vector (exact terms:
+     codes like HX-3127-C, names, numbers) - RETRIEVAL_MODE="hybrid" only.
+2. Reciprocal Rank Fusion: score = sum(1 / (RRF_K + rank)) over both lists.
+   Ranks, not raw scores, so a cosine 0.71 and a ts_rank 0.05 never need to be
+   put on one scale.
+3. Map each child to its parent passage (or itself), de-duplicate, and stop at
+   TOP_K_PASSAGES or the character budget. The agent reads parents.
+
+The old "section scoping" step (keep only the best-scoring section) was removed:
+on the retrieval eval it dropped correct chunks (e.g. a title-word match on
+"Shifts (Leipzig)" beat the right "Emergency procedures (Leipzig)" chunk).
+"""
+
 from __future__ import annotations
 
+import re
 from typing import Any
 
-import numpy as np
+from loguru import logger
+from sqlalchemy import func, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
 
-from app.models.chunks import Chunk
+from app.core.config import settings
+from app.models.chunks import Chunk, ChunkParent
 from app.models.file import File
 from app.services.embeddings.embedding_utils import embed_text_async
 from app.services.time.timing import log_async_timing
 
 
-MMR_LAMBDA = 0.7
-MMR_CANDIDATE_MULTIPLIER = 4
-SECTION_SCORE_MARGIN = 0.08
-MULTI_SECTION_LIMIT = 2
 
-
-def _to_numpy(vector: list[float] | tuple[float, ...] | None) -> np.ndarray | None:
-    if vector is None:
-        return None
-    array = np.asarray(vector, dtype=float)
-    if array.size == 0:
-        return None
-    return array
-
-
-def _cosine_similarity(left: np.ndarray | None, right: np.ndarray | None) -> float:
-    if left is None or right is None:
-        return 0.0
-
-    left_norm = np.linalg.norm(left)
-    right_norm = np.linalg.norm(right)
-    if left_norm == 0.0 or right_norm == 0.0:
-        return 0.0
-
-    return float(np.dot(left, right) / (left_norm * right_norm))
-
-
-def _normalize_text(text: str | None) -> str:
-    if not text:
-        return ""
-    return " ".join("".join(ch.lower() if ch.isalnum() else " " for ch in text).split())
+CANDIDATES_PER_METHOD = 30
+TOP_K_PASSAGES = 4
+CONTEXT_BUDGET_CHARS = 6000
+RRF_K = 60
+KEYWORD_WEIGHT_IDENTIFIER = 1.0
+KEYWORD_WEIGHT_PLAIN = 0.3
+_TERM = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.\-]*[A-Za-z0-9]|[A-Za-z0-9]")
 
 
 def _section_key(chunk: dict[str, Any]) -> str:
-    # Check for None BEFORE converting to str: str(None) == "None" is truthy,
-    # which made every non-PDF chunk fall into one "None" section.
     metadata = chunk.get("metadata") or {}
     for key in ("section_id", "sheet", "filename"):
         value = metadata.get(key)
@@ -65,167 +62,14 @@ def _section_label(chunk: dict[str, Any]) -> str:
     return ""
 
 
-def _section_title_match_score(query_text: str, section_label: str) -> float:
-    normalized_query = _normalize_text(query_text)
-    normalized_label = _normalize_text(section_label)
-    if not normalized_query or not normalized_label:
-        return 0.0
-
-    if normalized_label in normalized_query:
-        return 0.35
-
-    query_tokens = set(normalized_query.split())
-    label_tokens = set(normalized_label.split())
-    if not query_tokens or not label_tokens:
-        return 0.0
-
-    overlap = len(query_tokens & label_tokens) / len(label_tokens)
-    if overlap >= 0.8:
-        return 0.25
-    if overlap >= 0.5:
-        return 0.12
-    return 0.0
-
-
-def _select_section_scoped_chunks(
-    chunks: list[dict[str, Any]],
-    query_text: str,
-) -> list[dict[str, Any]]:
-    if not chunks:
-        return []
-
-    grouped_sections: dict[str, dict[str, Any]] = {}
-    for chunk in chunks:
-        key = _section_key(chunk)
-        section = grouped_sections.setdefault(
-            key,
-            {"chunks": [], "label": _section_label(chunk)},
-        )
-        section["chunks"].append(chunk)
-        if not section["label"]:
-            section["label"] = _section_label(chunk)
-
-    if len(grouped_sections) <= 1:
-        return chunks
-
-    ranked_sections: list[dict[str, Any]] = []
-    for key, section in grouped_sections.items():
-        section_chunks = section["chunks"]
-        ranked_relevances = sorted(
-            (float(chunk.get("relevance", 0.0)) for chunk in section_chunks),
-            reverse=True,
-        )
-        best_relevance = ranked_relevances[0] if ranked_relevances else 0.0
-        mean_top_relevance = (
-            sum(ranked_relevances[:2]) / min(len(ranked_relevances), 2)
-            if ranked_relevances
-            else 0.0
-        )
-        title_match_boost = _section_title_match_score(query_text, section["label"])
-        section_score = best_relevance + (0.15 * mean_top_relevance) + title_match_boost
-        ranked_sections.append(
-            {
-                "key": key,
-                "chunks": section_chunks,
-                "label": section["label"],
-                "score": section_score,
-                "title_match_boost": title_match_boost,
-            }
-        )
-
-    ranked_sections.sort(key=lambda section: section["score"], reverse=True)
-    top_section = ranked_sections[0]
-    second_score = ranked_sections[1]["score"] if len(ranked_sections) > 1 else float("-inf")
-
-    if (
-        top_section["title_match_boost"] > 0.0
-        or top_section["score"] >= second_score + SECTION_SCORE_MARGIN
-    ):
-        return top_section["chunks"]
-
-    selected_sections = ranked_sections[:MULTI_SECTION_LIMIT]
-    allowed_keys = {section["key"] for section in selected_sections}
-    return [chunk for chunk in chunks if _section_key(chunk) in allowed_keys]
-
-
-def _mmr_select_chunks(
-    chunks: list[dict[str, Any]],
-    query_embedding,
-    *,
-    top_k: int,
-    lambda_mult: float = MMR_LAMBDA,
-) -> list[dict[str, Any]]:
-    if len(chunks) <= top_k:
-        return chunks
-
-    query_vector = _to_numpy(query_embedding)
-    candidate_items: list[dict[str, Any]] = []
-    for chunk in chunks:
-        chunk_vector = _to_numpy(chunk.get("embedding"))
-        candidate_items.append(
-            {
-                "chunk": chunk,
-                "vector": chunk_vector,
-                "relevance": float(chunk.get("relevance", _cosine_similarity(query_vector, chunk_vector))),
-            }
-        )
-
-    selected_items: list[dict[str, Any]] = []
-    remaining_items = candidate_items.copy()
-
-    first_item = max(remaining_items, key=lambda item: item["relevance"])
-    selected_items.append(first_item)
-    remaining_items.remove(first_item)
-
-    while remaining_items and len(selected_items) < top_k:
-        best_item = None
-        best_score = float("-inf")
-
-        for item in remaining_items:
-            novelty_penalty = max(
-                (
-                    _cosine_similarity(item["vector"], selected["vector"])
-                    for selected in selected_items
-                ),
-                default=0.0,
-            )
-            mmr_score = (
-                lambda_mult * item["relevance"]
-                - (1.0 - lambda_mult) * novelty_penalty
-            )
-            if mmr_score > best_score:
-                best_score = mmr_score
-                best_item = item
-
-        if best_item is None:
-            break
-
-        selected_items.append(best_item)
-        remaining_items.remove(best_item)
-
-    return [item["chunk"] for item in selected_items]
-
-async def retrieve_similar_chunks(
-    query_text: str,
-    query_embedding,
-    file_ids,
-    conversation_id,
-    user_id,
-    db: AsyncSession,
-    top_k=5,
-    candidate_limit: int | None = None,
-):
-    if not file_ids:
-        return []
-
-    candidate_limit = candidate_limit or max(top_k * MMR_CANDIDATE_MULTIPLIER, top_k)
-
-    query = (
+def _owned_chunks(file_ids, conversation_id, user_id):
+    return (
         select(
             Chunk.id.label("id"),
             Chunk.content.label("content"),
             Chunk.file_metadata.label("metadata"),
-            Chunk.embedding.label("embedding"),
+            Chunk.parent_id.label("parent_id"),
+            File.filename.label("filename"),
         )
         .join(File, File.id == Chunk.file_id)
         .where(
@@ -234,37 +78,128 @@ async def retrieve_similar_chunks(
             File.user_id == user_id,
             File.status == "processed",
         )
+    )
+
+
+async def _vector_candidates(query_embedding, file_ids, conversation_id, user_id, db, limit):
+    # HNSW + a WHERE filter: by default the index returns ~ef_search nearest rows
+    # of ALL users and the filter runs afterwards, which can leave too few rows.
+    # pgvector >= 0.8 iterative scans keep walking the index until LIMIT is met.
+    await db.execute(text("SET LOCAL hnsw.iterative_scan = relaxed_order"))
+    query = (
+        _owned_chunks(file_ids, conversation_id, user_id)
         # cosine_distance matches the HNSW index (vector_cosine_ops) on chunk.embedding.
         .order_by(Chunk.embedding.cosine_distance(query_embedding))
-        .limit(candidate_limit)
+        .limit(limit)
     )
-    result = await db.execute(query)
-    rows = [dict(row) for row in result.mappings().all()]
-    query_vector = _to_numpy(query_embedding)
-    for row in rows:
-        row["relevance"] = _cosine_similarity(query_vector, _to_numpy(row.get("embedding")))
+    return [dict(row) for row in (await db.execute(query)).mappings().all()]
 
-    scoped_rows = _select_section_scoped_chunks(rows, query_text)
-    return _mmr_select_chunks(scoped_rows, query_embedding, top_k=top_k)
+
+def keyword_weight(query_text: str) -> float:
+    """
+    Keyword search shines on rare identifiers (HX-3127-C, E-7731, DC-09) and adds
+    noise on plain questions, where words like a city name match many sections
+    equally. Measured on the retrieval eval: full weight only when the query
+    contains a term with a digit.
+    """
+    return KEYWORD_WEIGHT_IDENTIFIER if any(any(ch.isdigit() for ch in term) for term in keyword_terms(query_text)) \
+        else KEYWORD_WEIGHT_PLAIN
+
+
+def keyword_terms(query_text: str) -> list[str]:
+    return list(dict.fromkeys(_TERM.findall(query_text or "")))[:32]
+
+
+async def _keyword_candidates(query_text, file_ids, conversation_id, user_id, db, limit):
+    terms = keyword_terms(query_text)
+    if not terms:
+        return []
+    # OR of the query's terms (stop words drop out; plainto_tsquery keeps
+    # "HX-3127-C" as one phrase). websearch_to_tsquery would AND every word,
+    # which a natural-language question almost never satisfies.
+    tsquery = None
+    for term in terms:
+        part = func.plainto_tsquery("english", term)
+        tsquery = part if tsquery is None else tsquery.op("||")(part)
+    rank = func.ts_rank_cd(Chunk.search_vector, tsquery)
+    query = (
+        _owned_chunks(file_ids, conversation_id, user_id)
+        .where(Chunk.search_vector.op("@@")(tsquery))
+        .order_by(rank.desc())
+        .limit(limit)
+    )
+    return [dict(row) for row in (await db.execute(query)).mappings().all()]
+
+
+def reciprocal_rank_fusion(*ranked_lists: list[dict], weights: tuple[float, ...] | None = None,
+                           k: int = RRF_K) -> list[dict]:
+    scores: dict[Any, float] = {}
+    rows: dict[Any, dict] = {}
+    for index, ranked in enumerate(ranked_lists):
+        weight = weights[index] if weights else 1.0
+        for rank, row in enumerate(ranked, start=1):
+            scores[row["id"]] = scores.get(row["id"], 0.0) + weight / (k + rank)
+            rows.setdefault(row["id"], row)
+    return [rows[i] for i in sorted(scores, key=scores.get, reverse=True)]
+
+
+async def _to_passages(ranked_chunks: list[dict], db, top_k: int, budget: int) -> list[dict]:
+    """Best children -> their parents, de-duplicated, within top_k and the budget."""
+    parent_ids = {c["parent_id"] for c in ranked_chunks if c.get("parent_id")}
+    parents = {}
+    if parent_ids:
+        result = await db.execute(select(ChunkParent.id, ChunkParent.content).where(ChunkParent.id.in_(parent_ids)))
+        parents = {row.id: row.content for row in result}
+    passages, seen, used = [], set(), 0
+    for chunk in ranked_chunks:
+        key = chunk.get("parent_id") or chunk["id"]
+        if key in seen:
+            continue
+        content = parents.get(chunk.get("parent_id")) or chunk["content"]
+        if passages and used + len(content) > budget:
+            continue  # a smaller passage further down may still fit
+        seen.add(key)
+        used += len(content)
+        passages.append({**chunk, "content": content})
+        if len(passages) >= top_k:
+            break
+    return passages
+
+
+async def retrieve_similar_chunks(
+    query_text: str,
+    query_embedding,
+    file_ids,
+    conversation_id,
+    user_id,
+    db: AsyncSession,
+    top_k: int = TOP_K_PASSAGES,
+    budget: int = CONTEXT_BUDGET_CHARS,
+):
+    if not file_ids:
+        return []
+    if query_embedding is None:
+        # Embeddings unavailable (quota/outage): keyword search needs no external
+        # API, so file questions still get an answer instead of a failed turn.
+        keyword = await _keyword_candidates(query_text, file_ids, conversation_id, user_id, db, CANDIDATES_PER_METHOD)
+        return await _to_passages(keyword, db, top_k, budget)
+    ranked = await _vector_candidates(query_embedding, file_ids, conversation_id, user_id, db, CANDIDATES_PER_METHOD)
+    if settings.RETRIEVAL_MODE == "hybrid":
+        keyword = await _keyword_candidates(query_text, file_ids, conversation_id, user_id, db, CANDIDATES_PER_METHOD)
+        ranked = reciprocal_rank_fusion(ranked, keyword, weights=(1.0, keyword_weight(query_text)))
+    return await _to_passages(ranked, db, top_k, budget)
+
 
 def build_context(chunks):
-    context_blocks: list[str] = []
-    last_section_key = None
-
+    """Passages with a "Source: file > section" line (lets the agent cite where it read it)."""
+    blocks: list[str] = []
     for chunk in chunks:
         content = (chunk.get("content") or "").strip()
         if not content:
             continue
-
-        current_section_key = _section_key(chunk)
-        current_section_label = _section_label(chunk)
-        if current_section_key != last_section_key and current_section_label:
-            context_blocks.append(f"Section: {current_section_label}")
-
-        context_blocks.append(content)
-        last_section_key = current_section_key
-
-    return "\n\n---\n\n".join(context_blocks)
+        source = " > ".join(x for x in (chunk.get("filename"), _section_label(chunk)) if x)
+        blocks.append(f"Source: {source}\n{content}" if source else content)
+    return "\n\n---\n\n".join(blocks)
 
 async def get_processed_file_ids(
     conversation_id,
@@ -350,7 +285,11 @@ async def retrieve_pipeline(
             )
         return ""
 
-    user_query = await embed_text_async(query, task="query")
+    try:
+        user_query = await embed_text_async(query, task="query")
+    except Exception as exc:
+        logger.warning("Query embedding failed; keyword-only retrieval | error={}", str(exc)[:200])
+        user_query = None
     similar_chunks = await retrieve_similar_chunks(
         query,
         user_query,

@@ -19,6 +19,8 @@ Key facts (measured on the free tier):
 import asyncio
 import re
 import threading
+
+import httpx
 import time
 from collections import OrderedDict
 from typing import Literal
@@ -34,6 +36,14 @@ EmbedTask = Literal["document", "query"]
 _TASK_TYPES = {"document": "RETRIEVAL_DOCUMENT", "query": "RETRIEVAL_QUERY"}
 MAX_BATCH = 50          # texts per API call (each still counts as one request)
 MAX_RETRIES = 5
+# Longest provider-suggested wait we honour. A per-minute limit asks for seconds;
+# an exhausted DAILY quota asks for ~22 hours, and sleeping that long froze a
+# whole ingestion/eval run. Beyond this, fail fast with a clear error instead.
+MAX_RETRY_WAIT_SECONDS = 60.0
+
+
+class EmbeddingQuotaExhausted(RuntimeError):
+    """The provider's quota will not recover soon (e.g. the free tier's daily limit)."""
 QUERY_CACHE_SIZE = 256
 
 _client: genai.Client | None = None
@@ -44,7 +54,10 @@ def _get_client() -> genai.Client:
     global _client
     with _client_lock:
         if _client is None:
-            _client = genai.Client(api_key=settings.GEMINI_API_KEY)
+            _client = genai.Client(
+            api_key=settings.GEMINI_API_KEY,
+            http_options=types.HttpOptions(timeout=settings.GEMINI_HTTP_TIMEOUT_MS),
+        )
     return _client
 
 
@@ -100,8 +113,14 @@ def _embed_batch(texts: list[str], task: EmbedTask) -> list[list[float]]:
             return _normalize([e.values for e in response.embeddings])
         except Exception as exc:
             text = str(exc)
-            if ("429" in text or "RESOURCE_EXHAUSTED" in text or "503" in text) and attempt < MAX_RETRIES - 1:
+            transient = ("429" in text or "RESOURCE_EXHAUSTED" in text or "503" in text
+                         or isinstance(exc, (httpx.TimeoutException, httpx.NetworkError)))
+            if transient and attempt < MAX_RETRIES - 1:
                 delay = _retry_delay(exc, attempt)
+                if delay > MAX_RETRY_WAIT_SECONDS:
+                    raise EmbeddingQuotaExhausted(
+                        f"Embedding quota exhausted; the provider asks to retry in {delay / 3600:.1f} h."
+                    ) from exc
                 logger.warning("Embedding rate-limited; retrying in {}s (attempt {})", delay, attempt + 1)
                 time.sleep(delay)
                 continue

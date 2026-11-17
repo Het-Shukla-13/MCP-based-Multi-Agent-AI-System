@@ -1,0 +1,6 @@
+{"id": "a01", "agent": "data", "message": "Using sales.csv, what is the total revenue for each region?", "reference": "North 5550, West 3200, South 3050, East 2400. North is highest."}
+{"id": "a02", "agent": "data", "message": "Which product sold the most units in sales.csv, and how many?", "reference": "Widget, with 49 units in total (12+8+20+9)."}
+{"id": "a03", "agent": "code", "message": "Check buggy.py and explain the problem.", "reference": "Syntax error in the add method: missing closing parenthesis on self.items.append((name, price)."}
+{"id": "a04", "agent": "document", "message": "According to notes.md, what is the project deadline and who owns the README?", "reference": "Deadline is 15 December; Priya owns the README."}
+{"id": "a05", "agent": "general", "message": "Explain what a vector index is in two or three sentences.", "reference": "A data structure for fast (approximate) nearest-neighbour search over embeddings/vectors, used for similarity search, e.g. HNSW or IVF."}
+{"id": "a06", "agent": "code", "message": "Write a Python function that returns the n-th Fibonacci number iteratively.", "reference": "A correct iterative function (loop with two running values), handling n=0 and n=1; code in a fenced block."}

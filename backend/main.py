@@ -4,6 +4,9 @@ from app.core.config import settings
 from app.core.logging import setup_logging
 from app.core.openapi import normalize_binary_upload_schema
 from app.api.auth import router as auth_router
+from app.api.metrics import router as metrics_router
+from app.services.metrics.writer import metrics_writer
+from app.services.turns import turn_runner
 from app.api.ws import router as ws_router
 from app.api.conversation import router as conversation_router
 from app.api.user import router as user_router
@@ -28,6 +31,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 app.include_router(auth_router)
+app.include_router(metrics_router)
 app.include_router(ws_router)
 app.include_router(conversation_router)
 app.include_router(user_router)
@@ -59,7 +63,15 @@ async def health_check():
     return {"status": "ok"}
 
 
+@app.on_event("startup")
+async def start_background_workers():
+    metrics_writer.start()  # drains queued metrics into the database in batches
+    await turn_runner.start()  # sweep turns a previous process left behind, resume its queue
+
+
 @app.on_event("shutdown")
 async def shutdown_background_workers():
+    await turn_runner.shutdown()  # stop running turns (partial answers saved); queue resumes on restart
+    await metrics_writer.stop()  # flush the last batch
     shutdown_local_file_task_executor()
     await close_all_toolsets()  # stop MCP server child processes

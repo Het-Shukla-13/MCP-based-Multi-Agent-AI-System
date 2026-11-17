@@ -1,9 +1,28 @@
-from dataclasses import dataclass
+"""
+Short-term memory (STM): the recent-history view of a conversation + a rolling summary.
+
+Hot path (every turn): compact_history() builds the view with NO LLM call
+(layers L0-L2, L4 in compaction.py) and uses the rolling summary as it is.
+
+Background (after the turn): refresh_rolling_summary() folds the messages that
+left the view and aren't summarised yet into the summary (layer L3), and moves
+the `summarized_until` marker so each message is summarised once.
+
+STM state lives in conversation.convo_metadata["stm"]. The turn and the
+background job write DIFFERENT keys through atomic JSONB patches, so neither can
+overwrite the other's update.
+"""
+from datetime import datetime
 
 from loguru import logger
 
-from app.services.tokenization.token_service import build_token_limited_history
-from app.models.message import Message
+from app.services.memory.compaction import (
+    HISTORY_TOKEN_BUDGET,
+    CompactionResult,
+    ViewMessage,
+    compact_history,
+    unsummarized,
+)
 from app.services.summarization.summarization_service import (
     is_valid_summary,
     normalize_summary,
@@ -11,45 +30,27 @@ from app.services.summarization.summarization_service import (
 )
 from app.services.time.timing import log_async_timing
 
-SUMMARY_TOKEN_BUDGET = 1000
-RAW_HISTORY_TOKEN_BUDGET = 2600
-PRESERVE_RECENT_MESSAGES = 10
-PRESERVE_RECENT_TURNS = 5
-SUMMARY_REFRESH_INTERVAL = 4
-
-
-@dataclass
-class StmContext:
-    recent_messages: list[Message]
-    rolling_summary: str
-    dropped_messages: list[Message]
-    token_usage: int
-    dropped_count: int
-    summary_updated: bool
+SUMMARY_PREFIX = "Compressed memory from earlier conversation."
+# Keys each writer owns inside convo_metadata["stm"].
+TURN_KEYS = ("last_token_usage", "last_dropped_count", "recent_message_count", "pending_summary", "compaction_layers")
+SUMMARY_KEYS = ("rolling_summary", "summarized_until", "summary_update_count")
 
 
 def get_stm_state(convo_metadata: dict | None) -> dict:
     if not convo_metadata:
         return {}
     stm_state = convo_metadata.get("stm")
-    if isinstance(stm_state, dict):
-        return stm_state
-    return {}
+    return stm_state if isinstance(stm_state, dict) else {}
 
 
-def set_stm_state(convo_metadata: dict | None, stm_state: dict) -> dict:
-    metadata = dict(convo_metadata or {})
-    metadata["stm"] = stm_state
-    return metadata
-
-
-def build_summary_message(rolling_summary: str) -> Message | None:
+def build_summary_message(rolling_summary: str) -> ViewMessage | None:
     if not rolling_summary:
         return None
-    return Message(
+    return ViewMessage(
+        id=None,
         role="system",
         content=(
-            "Compressed memory from earlier conversation.\n"
+            f"{SUMMARY_PREFIX}\n"
             "Use it only as background context. Prefer the newer raw messages when they conflict.\n"
             "Do not switch into meta commentary just because this summary exists.\n\n"
             f"{rolling_summary}"
@@ -57,91 +58,60 @@ def build_summary_message(rolling_summary: str) -> Message | None:
     )
 
 
-@log_async_timing("build_stm_context")
-async def build_stm_context(
-    messages,
-    existing_summary: str = "",
-    summary_update_count: int = 0,
-    max_tokens=3600,
-):
-    regular_messages = list(messages)
-
-    raw_budget = min(RAW_HISTORY_TOKEN_BUDGET, max_tokens)
-    if max_tokens > SUMMARY_TOKEN_BUDGET:
-        raw_budget = min(raw_budget, max_tokens - SUMMARY_TOKEN_BUDGET)
-
-    selected, dropped = build_token_limited_history(
-        regular_messages,
-        max_tokens=raw_budget,
-        preserve_recent_messages=PRESERVE_RECENT_MESSAGES,
-        preserve_recent_turns=PRESERVE_RECENT_TURNS,
-    )
-
-    next_summary = existing_summary
-    summary_updated = False
-    if dropped:
-        summary_source_messages = dropped
-        if summary_update_count and summary_update_count % SUMMARY_REFRESH_INTERVAL == 0:
-            summary_source_messages = regular_messages[:-len(selected)] if selected else regular_messages
-
-        raw_candidate_summary = await summarize_messages(
-            summary_source_messages,
-            existing_summary=existing_summary,
-        )
-        candidate_summary = normalize_summary(raw_candidate_summary)
-        logger.info(
-            "STM summary candidate | dropped_count={} | normalized_chars={} | raw_preview={}",
-            len(dropped),
-            len(candidate_summary),
-            (raw_candidate_summary or "")[:300],
-        )
-        if is_valid_summary(candidate_summary):
-            next_summary = candidate_summary
-            summary_updated = True
-        else:
-            logger.warning(
-                "STM summary rejected | dropped_count={} | raw_preview={}",
-                len(dropped),
-                (raw_candidate_summary or "")[:300],
-            )
-
-    token_usage = sum(getattr(message, "token_count", 0) or 0 for message in selected)
-
-    return StmContext(
-        recent_messages=selected,
-        rolling_summary=next_summary,
-        dropped_messages=dropped,
-        token_usage=token_usage,
-        dropped_count=len(dropped),
-        summary_updated=summary_updated,
-    )
-
-
 @log_async_timing("build_smart_history")
-async def build_smart_history(messages, convo_metadata: dict | None = None, max_tokens=3600):
+async def build_smart_history(messages, convo_metadata: dict | None = None, max_tokens: int = HISTORY_TOKEN_BUDGET):
+    """
+    -> (history view incl. summary pseudo-message, turn-owned STM patch, CompactionResult).
+    No LLM call: if messages left the view unsummarised, `pending_summary` asks the
+    background job to summarise them after this turn.
+    """
     stm_state = get_stm_state(convo_metadata)
-    stm_context = await build_stm_context(
-        messages,
-        existing_summary=stm_state.get("rolling_summary", ""),
-        summary_update_count=stm_state.get("summary_update_count", 0),
-        max_tokens=max_tokens,
-    )
+    result: CompactionResult = compact_history(messages, budget=max_tokens)
+    pending = unsummarized(result.dropped, stm_state.get("summarized_until"))
 
-    next_update_count = stm_state.get("summary_update_count", 0)
-    if stm_context.summary_updated:
-        next_update_count += 1
-
-    updated_stm_state = {
-        "rolling_summary": stm_context.rolling_summary,
-        "summary_update_count": next_update_count,
-        "last_token_usage": stm_context.token_usage,
-        "last_dropped_count": stm_context.dropped_count,
-        "recent_message_count": len(stm_context.recent_messages),
+    stm_patch = {
+        "last_token_usage": result.tokens_after,
+        "last_dropped_count": len(result.dropped),
+        "recent_message_count": len(result.messages),
+        "pending_summary": bool(pending),
+        "compaction_layers": result.layers,
     }
+    if result.layers != ["L0"]:
+        logger.info("STM compaction | layers={} | tokens {} -> {} | dropped={} | unsummarized={}",
+                    result.layers, result.tokens_before, result.tokens_after, len(result.dropped), len(pending))
 
-    history_messages = list(stm_context.recent_messages)
-    summary_message = build_summary_message(stm_context.rolling_summary)
+    history = list(result.messages)
+    summary_message = build_summary_message(stm_state.get("rolling_summary", ""))
     if summary_message:
-        history_messages = [summary_message] + history_messages
+        history = [summary_message] + history
+    return history, stm_patch, result
 
-    return history_messages, updated_stm_state, stm_context
+
+async def refresh_rolling_summary(db, conversation_id, messages, convo_metadata: dict | None) -> bool:
+    """
+    L3, run in the background after a turn: summarise only the dropped messages
+    newer than `summarized_until`, then patch the summary keys atomically.
+    Returns True when the summary changed.
+    """
+    from app.crud.conversation import patch_conversation_metadata
+
+    stm_state = get_stm_state(convo_metadata)
+    result = compact_history(messages)
+    todo = unsummarized(result.dropped, stm_state.get("summarized_until"))
+    if not todo:
+        return False
+    existing = stm_state.get("rolling_summary", "")
+    candidate = normalize_summary(await summarize_messages(todo, existing_summary=existing))
+    if not is_valid_summary(candidate):
+        logger.warning("STM summary rejected | messages={} | preview={}", len(todo), candidate[:200])
+        return False
+    newest = max((m.created_at for m in todo if m.created_at), default=None)
+    await patch_conversation_metadata(db, conversation_id, {
+        "rolling_summary": candidate,
+        "summarized_until": (newest or datetime.utcnow()).isoformat(),
+        "summary_update_count": int(stm_state.get("summary_update_count", 0)) + 1,
+        "pending_summary": False,
+    }, under="stm")
+    logger.info("STM summary refreshed | conversation={} | folded_messages={} | chars={}",
+                conversation_id, len(todo), len(candidate))
+    return True

@@ -3,6 +3,7 @@ from google.adk.agents.llm_agent import LlmAgent
 
 from app.agent_layer.core.base import BaseAgent
 from app.agent_layer.schemas import AgentContext
+from app.prompts import load_prompt
 
 
 class DocumentAgent(BaseAgent):
@@ -17,30 +18,7 @@ class DocumentAgent(BaseAgent):
         return LlmAgent(
             name="document",
             model=settings.AGENT_MODEL,
-            instruction="""
-You are an expert Document Analyst Assistant.
-
-You specialize in:
-- Reading, parsing, and summarizing long-form text (PDFs, Word Documents, TXT).
-- Extracting key entities, action items, and clauses from contracts or reports.
-- Reformatting raw text into structured markdown.
-
-When answering:
-- Always reference the specific sections or concepts from the provided document context.
-- If asked to summarize, provide a high-level overview followed by bullet points of key details.
-- Be precise and do not hallucinate details not found in the text.
-
-You MUST use provided context (especially parsed text from PDF/DOCX files in RAG CONTEXT) if present.
-
-TOOLS:
-- list_files, then search_files for specific questions or read_file for summaries
-  and structure. Quote section names when relevant.
-- When the user asks for a downloadable file (report, notes, CSV, JSON, PDF...), write the
-  complete content yourself, call create_file, then share the returned download_url as a
-  Markdown link [filename](download_url).
-- For reports, meeting notes, study notes, comparisons or emails, prefer list_templates
-  then create_from_template for a consistent structure.
-""",
+            instruction=load_prompt("agents/document"),
         )
 
     def build_prompt(self, context: AgentContext) -> str:

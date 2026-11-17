@@ -21,6 +21,8 @@ class Message(SQLModel, table=True):
     token_count: Optional[int] = Field(default=None, sa_column=Column(Integer, nullable=True))
     # Which agent wrote this reply (assistant messages only; NULL for user messages).
     agent_name: Optional[str] = Field(default=None, sa_column=Column(String, nullable=True))
+    # complete | stopped (user pressed Stop; content is the partial answer) | interrupted
+    status: str = Field(default="complete", sa_column=Column(String, nullable=False, server_default="complete"))
     created_at: datetime = Field(default_factory=datetime.utcnow, sa_column=Column(DateTime, nullable=False))
     updated_at: datetime = Field(default_factory=datetime.utcnow, sa_column=Column(DateTime, nullable=False))
 

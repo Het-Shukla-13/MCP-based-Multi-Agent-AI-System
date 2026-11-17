@@ -42,9 +42,12 @@ from app.agent_layer.core.base import (
     run_config,
     emit_tool_events,
     is_retryable_provider_error,
+    wait_for_quota,
 )
 from app.agent_layer.schemas import AgentContext, AgentResponse
 from app.core.config import settings
+from app.prompts import render_prompt
+from app.services.metrics.collector import current_turn, observe_adk_event
 
 logger = logging.getLogger(__name__)
 
@@ -71,20 +74,13 @@ def _router_instruction(context: AgentContext, agents: list[BaseAgent]) -> str:
     recent = "\n".join(
         f"{m.role.upper()}: {m.content[:300]}" for m in context.history[-ROUTER_HISTORY_MESSAGES:]
     )
-    names = ", ".join(a.name for a in agents)
-    return f"""You are the ROUTER of a multi-agent assistant. You never answer the user yourself.
-For every message, call transfer_to_agent with exactly one of: {names}.
-
-Rules:
-- Pick the agent whose description best matches what the user is asking for NOW.
-- Follow-ups ("and?", "make it shorter", "add type hints") belong to the agent that
-  handled the previous turn: {context.previous_agent}.
-- Greetings, small talk and anything unclear go to {DEFAULT_AGENT}.
-- Attached files: code files -> code, CSV/XLSX -> data, PDF/DOCX -> document, images -> image.
-
-Recent conversation (for follow-up detection only):
-{recent or "(none)"}
-"""
+    return render_prompt(
+        "agents/router",
+        names=", ".join(a.name for a in agents),
+        previous_agent=context.previous_agent,
+        default_agent=DEFAULT_AGENT,
+        recent=recent or "(none)",
+    )
 
 
 class RootAgent:
@@ -129,6 +125,16 @@ class RootAgent:
                 if not is_retryable_provider_error(exc):
                     break
                 logger.warning("Delegation failed on %s/%s (retryable); trying fallbacks", router_model, agent_model)
+                turn = current_turn.get()
+                if turn is not None:
+                    turn.fallback_used = True
+        # Every model rate-limited in the same minute: wait the provider's suggested
+        # delay (if short) and retry the primary pair once instead of failing the turn.
+        if last_exc is not None and await wait_for_quota(last_exc, on_status, ROOT_NAME):
+            try:
+                return await self._delegate(context, attempts[0][0], attempts[0][1], emit, on_status)
+            except Exception as exc:
+                last_exc = exc
         raise AgentExecutionError(ROOT_NAME, last_exc)
 
     async def _delegate(self, context, router_model, agent_model, emit, on_status) -> AgentResponse:
@@ -156,6 +162,7 @@ class RootAgent:
             new_message=Content(role="user", parts=[Part.from_text(text=context.user_message)]),
             run_config=run_config(),
         ):
+            observe_adk_event(event, router_model if event.author == ROOT_NAME else agent_model)  # metrics
             await emit_tool_events(on_status, event)
             if event.author != ROOT_NAME:  # never stream the router's own text
                 await emit_text_delta(on_status, event)
