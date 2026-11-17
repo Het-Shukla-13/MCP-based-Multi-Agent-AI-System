@@ -45,6 +45,7 @@ from app.agent_layer.core.base import (
 )
 from app.agent_layer.schemas import AgentContext, AgentResponse
 from app.core.config import settings
+from app.services.metrics.collector import current_turn, observe_adk_event
 
 logger = logging.getLogger(__name__)
 
@@ -129,6 +130,9 @@ class RootAgent:
                 if not is_retryable_provider_error(exc):
                     break
                 logger.warning("Delegation failed on %s/%s (retryable); trying fallbacks", router_model, agent_model)
+                turn = current_turn.get()
+                if turn is not None:
+                    turn.fallback_used = True
         raise AgentExecutionError(ROOT_NAME, last_exc)
 
     async def _delegate(self, context, router_model, agent_model, emit, on_status) -> AgentResponse:
@@ -156,6 +160,7 @@ class RootAgent:
             new_message=Content(role="user", parts=[Part.from_text(text=context.user_message)]),
             run_config=run_config(),
         ):
+            observe_adk_event(event, router_model if event.author == ROOT_NAME else agent_model)  # metrics
             await emit_tool_events(on_status, event)
             if event.author != ROOT_NAME:  # never stream the router's own text
                 await emit_text_delta(on_status, event)
