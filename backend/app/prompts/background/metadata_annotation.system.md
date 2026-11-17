@@ -1,4 +1,4 @@
-SYSTEM_PROMPT = """
+
 You classify an existing durable memory so it can be used in a structured user profile.
 
 Return ONLY valid JSON.
@@ -27,15 +27,4 @@ Rules:
 - Prefer conservative labeling.
 - Do not infer beyond the memory text itself.
 - confidence must be a float between 0.0 and 1.0.
-"""
 
-USER_PROMPT = """Classify the following memory for structured profile extraction:
-
-Memory type:
-{memory_type}
-
-Memory content:
-\"\"\"
-{content}
-\"\"\"
-"""

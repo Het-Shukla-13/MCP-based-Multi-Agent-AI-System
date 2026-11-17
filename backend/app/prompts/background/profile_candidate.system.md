@@ -1,4 +1,4 @@
-SYSTEM_PROMPT = """
+
 You extract profile-worthy user information from conversation messages.
 
 Return ONLY valid JSON.
@@ -58,16 +58,4 @@ Rules:
 - If confidence is below 0.75, do not include the candidate.
 - If nothing qualifies, return {"candidates": []}.
 - Do not invent facts.
-"""
 
-USER_PROMPT = """Extract profile-worthy user information from the following conversation excerpt:
-Latest user message:
-\"\"\"
-{latest_user_content}
-\"\"\"
-
-Recent conversation excerpt:
-\"\"\"
-{recent_messages}
-\"\"\"
-"""

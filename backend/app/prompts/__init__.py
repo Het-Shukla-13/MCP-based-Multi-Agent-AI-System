@@ -1,18 +1,23 @@
-from app.prompts.chat import SYSTEM_PROMPT as CHAT_SYSTEM_PROMPT
-from app.prompts.summarization import SYSTEM_PROMPT as SUMMARIZATION_SYSTEM_PROMPT
-from app.prompts.summarization import USER_PROMPT as SUMMARIZATION_USER_PROMPT
-from app.prompts.conversation_metadata import SYSTEM_PROMPT as CONVERSATION_METADATA_SYSTEM_PROMPT
-from app.prompts.conversation_metadata import USER_PROMPT as CONVERSATION_METADATA_USER_PROMPT
-from app.prompts.memory_comparison import SYSTEM_PROMPT as MEMORY_COMPARISON_SYSTEM_PROMPT
-from app.prompts.memory_comparison import USER_PROMPT as MEMORY_COMPARISON_USER_PROMPT
-from app.prompts.memory_extraction import SYSTEM_PROMPT as MEMORY_EXTRACTION_SYSTEM_PROMPT
-from app.prompts.memory_extraction import USER_PROMPT as MEMORY_EXTRACTION_USER_PROMPT
-from app.prompts.metadata_annotation import SYSTEM_PROMPT as METADATA_ANNOTATION_SYSTEM_PROMPT
-from app.prompts.metadata_annotation import USER_PROMPT as METADATA_ANNOTATION_USER_PROMPT
-from app.prompts.profile_candidate import SYSTEM_PROMPT as PROFILE_CANDIDATE_SYSTEM_PROMPT
-from app.prompts.profile_candidate import USER_PROMPT as PROFILE_CANDIDATE_USER_PROMPT
+"""Background-job prompts (memory, summaries, metadata). Text lives in background/*.md."""
+from app.prompts.loader import load_prompt, render_prompt
+
+CHAT_SYSTEM_PROMPT = load_prompt("background/chat.system")
+SUMMARIZATION_SYSTEM_PROMPT = load_prompt("background/summarization.system")
+SUMMARIZATION_USER_PROMPT = load_prompt("background/summarization.user")
+CONVERSATION_METADATA_SYSTEM_PROMPT = load_prompt("background/conversation_metadata.system")
+CONVERSATION_METADATA_USER_PROMPT = load_prompt("background/conversation_metadata.user")
+MEMORY_COMPARISON_SYSTEM_PROMPT = load_prompt("background/memory_comparison.system")
+MEMORY_COMPARISON_USER_PROMPT = load_prompt("background/memory_comparison.user")
+MEMORY_EXTRACTION_SYSTEM_PROMPT = load_prompt("background/memory_extraction.system")
+MEMORY_EXTRACTION_USER_PROMPT = load_prompt("background/memory_extraction.user")
+METADATA_ANNOTATION_SYSTEM_PROMPT = load_prompt("background/metadata_annotation.system")
+METADATA_ANNOTATION_USER_PROMPT = load_prompt("background/metadata_annotation.user")
+PROFILE_CANDIDATE_SYSTEM_PROMPT = load_prompt("background/profile_candidate.system")
+PROFILE_CANDIDATE_USER_PROMPT = load_prompt("background/profile_candidate.user")
 
 __all__ = [
+    "load_prompt",
+    "render_prompt",
     "CHAT_SYSTEM_PROMPT",
     "SUMMARIZATION_SYSTEM_PROMPT",
     "SUMMARIZATION_USER_PROMPT",
@@ -26,5 +31,4 @@ __all__ = [
     "METADATA_ANNOTATION_USER_PROMPT",
     "PROFILE_CANDIDATE_SYSTEM_PROMPT",
     "PROFILE_CANDIDATE_USER_PROMPT",
-
 ]

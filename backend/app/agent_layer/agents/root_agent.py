@@ -46,6 +46,7 @@ from app.agent_layer.core.base import (
 )
 from app.agent_layer.schemas import AgentContext, AgentResponse
 from app.core.config import settings
+from app.prompts import render_prompt
 from app.services.metrics.collector import current_turn, observe_adk_event
 
 logger = logging.getLogger(__name__)
@@ -73,20 +74,13 @@ def _router_instruction(context: AgentContext, agents: list[BaseAgent]) -> str:
     recent = "\n".join(
         f"{m.role.upper()}: {m.content[:300]}" for m in context.history[-ROUTER_HISTORY_MESSAGES:]
     )
-    names = ", ".join(a.name for a in agents)
-    return f"""You are the ROUTER of a multi-agent assistant. You never answer the user yourself.
-For every message, call transfer_to_agent with exactly one of: {names}.
-
-Rules:
-- Pick the agent whose description best matches what the user is asking for NOW.
-- Follow-ups ("and?", "make it shorter", "add type hints") belong to the agent that
-  handled the previous turn: {context.previous_agent}.
-- Greetings, small talk and anything unclear go to {DEFAULT_AGENT}.
-- Attached files: code files -> code, CSV/XLSX -> data, PDF/DOCX -> document, images -> image.
-
-Recent conversation (for follow-up detection only):
-{recent or "(none)"}
-"""
+    return render_prompt(
+        "agents/router",
+        names=", ".join(a.name for a in agents),
+        previous_agent=context.previous_agent,
+        default_agent=DEFAULT_AGENT,
+        recent=recent or "(none)",
+    )
 
 
 class RootAgent:
