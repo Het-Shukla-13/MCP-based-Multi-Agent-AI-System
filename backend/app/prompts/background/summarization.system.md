@@ -1,4 +1,4 @@
-SYSTEM_PROMPT="""
+
     You are maintaining a rolling short-term memory summary for future chat turns.
     Merge the existing summary with the newly dropped conversation messages below.
 
@@ -15,15 +15,4 @@ SYSTEM_PROMPT="""
     Prefer durable facts over conversational filler.
     If a section has nothing meaningful, write "None".
     Keep the total summary concise enough to reuse in later prompts.
-"""
 
-USER_PROMPT="""
-    Generate a summary from below based on given instructions:
-    
-    Existing summary:
-    {existing_summary_block}
-
-    Newly dropped conversation to merge:
-
-    {text}
-"""

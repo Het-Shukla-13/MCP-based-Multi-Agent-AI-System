@@ -1,4 +1,4 @@
-SYSTEM_PROMPT = """
+
 You extract durable long-term memory candidates from a conversation.
 
 Return ONLY valid JSON.
@@ -168,11 +168,4 @@ Conversation:
 user: Let's analyze this one passage.
 Output:
 No memory should be stored if this is only a one-off discussion topic with no lasting user relevance.
-"""
 
-USER_PROMPT="""
-    Conversation:
-    \"\"\"
-    {conversation_text}
-    \"\"\"
-"""

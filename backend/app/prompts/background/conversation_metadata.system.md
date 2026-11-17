@@ -1,4 +1,4 @@
-SYSTEM_PROMPT = """
+
 You extract compact conversation metadata for memory and retrieval.
 
 Return ONLY valid JSON.
@@ -24,13 +24,4 @@ Rules:
 - Do not invent facts.
 - Do not carry forward superseded or unrelated goals from earlier parts of the conversation.
 - Do not encode recurring answer formats, stylistic quirks, games, or temporary reply patterns as active_goals unless the user is clearly still pursuing them right now.
-"""
 
-USER_PROMPT = """
-Extract conversation metadata from the following recent conversation excerpt:
-
-Conversation:
-\"\"\"
-{conversation_text}
-\"\"\"
-"""
