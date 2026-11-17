@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+import asyncio
 import logging
 import re
 from time import perf_counter
@@ -25,6 +26,33 @@ StatusCallback = Callable[[dict], Awaitable[None]]
 
 _RETRYABLE_MARKERS = ("429", "resource_exhausted", "quota", "500", "503", "unavailable",
                       "overloaded", "high demand", "internal error", "deadline")
+
+
+MAX_QUOTA_WAIT_SECONDS = 20.0
+
+
+def quota_retry_delay(exc: Exception) -> float | None:
+    """
+    For a rate-limit (429 / RESOURCE_EXHAUSTED) error, the delay the provider asks for,
+    e.g. "'retryDelay': '12s'" or "retry in 12.3s". None if not a rate limit.
+    Free tiers limit requests PER MINUTE, so a short wait usually succeeds.
+    """
+    text = str(exc)
+    if "429" not in text and "resource_exhausted" not in text.lower():
+        return None
+    match = re.search(r"retryDelay'?\"?:\s*'?\"?(\d+(?:\.\d+)?)s", text) or re.search(r"retry in (\d+(?:\.\d+)?)\s*s", text, re.I)
+    return float(match.group(1)) + 0.5 if match else 10.0
+
+
+async def wait_for_quota(exc: Exception, on_status: "StatusCallback | None", agent: str) -> bool:
+    """Wait out a short rate-limit window (telling the UI). False if not worth waiting."""
+    delay = quota_retry_delay(exc)
+    if delay is None or delay > MAX_QUOTA_WAIT_SECONDS:
+        return False
+    logger.warning("All models rate-limited; waiting %.1fs before one retry", delay)
+    await emit_status(on_status, {"status": "waiting", "agent": agent, "seconds": round(delay)})
+    await asyncio.sleep(delay)
+    return True
 
 
 def is_retryable_provider_error(exc: Exception) -> bool:
@@ -286,7 +314,15 @@ class BaseAgent(ABC):
                 turn.fallback_used = True
             # Fallback uses its own fresh agent object; nothing shared is mutated.
             generated = []
-            final_text = await self._run_with_model(context, prompt, fallback_model, on_status, generated)
+            try:
+                final_text = await self._run_with_model(context, prompt, fallback_model, on_status, generated)
+            except Exception as fallback_exc:
+                # Both models rate-limited in the same minute: wait the provider's
+                # suggested delay (if short) and retry the fallback once.
+                if not await wait_for_quota(fallback_exc, on_status, self.name):
+                    raise
+                generated = []
+                final_text = await self._run_with_model(context, prompt, fallback_model, on_status, generated)
 
         return AgentResponse(
             content=final_text.strip(),

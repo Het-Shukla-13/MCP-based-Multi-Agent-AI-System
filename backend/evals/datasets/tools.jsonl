@@ -1,0 +1,10 @@
+{"id": "t01", "agent": "data", "message": "Using sales.csv, what is the total revenue per region?", "must_call": [["aggregate"]], "must_not_call": ["generate_image"]}
+{"id": "t02", "agent": "data", "message": "What columns does sales.csv have and how many rows?", "must_call": [["table_info", "read_file"]], "must_not_call": ["web_search"]}
+{"id": "t03", "agent": "data", "message": "Show the 3 rows of sales.csv with the highest units.", "must_call": [["top_n", "filter_rows"]], "must_not_call": []}
+{"id": "t04", "agent": "code", "message": "Check buggy.py for syntax errors.", "must_call": [["analyze_code"]], "must_not_call": ["web_search"]}
+{"id": "t05", "agent": "code", "message": "Write a Python function that reverses a string.", "must_call": [], "must_not_call": ["analyze_code", "read_file", "create_file"], "note": "no tool needed"}
+{"id": "t06", "agent": "document", "message": "What files have I uploaded in this conversation?", "must_call": [["list_files"]], "must_not_call": ["web_search"]}
+{"id": "t07", "agent": "document", "message": "What does notes.md say about the project deadline?", "must_call": [["search_files", "read_file"]], "must_not_call": []}
+{"id": "t08", "agent": "research", "message": "What is the latest stable release of PostgreSQL? Cite a source.", "must_call": [["web_search"]], "must_not_call": ["create_file"]}
+{"id": "t09", "agent": "general", "message": "Create a markdown file with a short packing list for a beach trip.", "must_call": [["create_file", "create_from_template"]], "must_not_call": []}
+{"id": "t10", "agent": "general", "message": "Hello! How are you?", "must_call": [], "must_not_call": ["create_file", "list_files", "search_files"], "note": "no tool needed"}
