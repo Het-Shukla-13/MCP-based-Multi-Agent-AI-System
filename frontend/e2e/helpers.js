@@ -34,7 +34,7 @@ export async function send(page, text, { timeout = 120_000 } = {}) {
   await page.getByLabel("Chat message input").fill(text);
   await page.getByRole("button", { name: "Send" }).click();
   await expect(replies).toHaveCount(before + 1, { timeout });
-  await expect(page.locator(".stream-cursor, .message--pending")).toHaveCount(0, { timeout });
+  await expect(page.locator(".message--streaming, .message--pending")).toHaveCount(0, { timeout });
   return replies.last();
 }
 

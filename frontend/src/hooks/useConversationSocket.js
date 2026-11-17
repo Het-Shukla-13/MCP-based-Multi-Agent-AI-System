@@ -1,17 +1,22 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ensureFreshToken, refreshSession } from "../lib/api";
 import { buildConversationWebSocketUrl } from "../lib/socket";
+import { progressFromSnapshot, progressReducer } from "../lib/turnProgress";
 
 /**
  * One WebSocket per open conversation, with automatic reconnection.
  *
  * Server -> client events (see README "WebSocket protocol"):
- *   agent_status  {status: routing|working|tool, agent, tool?}  live progress
+ *   turn_state    {current: {status, agent, draft}, queued}   on connect (replay)
+ *   agent_status  {status: routing|working|tool|waiting, agent, tool?, seconds?}
  *   chat_delta    {agent, text}                                streamed reply text
  *   chat          {user_message, ai_message, active_agent, error}  final, saved
  *
  * Streamed text builds a local DRAFT message; the final "chat" event replaces it
  * with the saved message (the server's copy is the source of truth).
+ *
+ * Deltas are batched: they're buffered and applied once per animation frame, so
+ * a fast stream causes at most one render per frame instead of one per token.
  *
  * Reconnection: unexpected closes retry with exponential backoff + jitter. After
  * reconnecting, `onResync` reloads the conversation, so a reply that finished while
@@ -19,7 +24,7 @@ import { buildConversationWebSocketUrl } from "../lib/socket";
  * token first.
  */
 
-const DRAFT_ID = "draft-assistant";
+export const DRAFT_ID = "draft-assistant";
 const BASE_DELAY_MS = 1000;
 const MAX_DELAY_MS = 15000;
 const POLICY_VIOLATION = 1008; // server's "not authenticated / not your conversation"
@@ -33,6 +38,16 @@ function createTempMessage(content, fileIds) {
     role: "user",
     file_ids: fileIds,
   };
+}
+
+function appendDraft(messages, text, agent) {
+  if (messages.some((m) => m.id === DRAFT_ID)) {
+    return messages.map((m) => (m.id === DRAFT_ID ? { ...m, content: m.content + text } : m));
+  }
+  return [
+    ...messages,
+    { id: DRAFT_ID, role: "assistant", content: text, agent_name: agent, streaming: true, created_at: new Date().toISOString() },
+  ];
 }
 
 function replaceWithSaved(messages, userMessage, aiMessage) {
@@ -63,6 +78,7 @@ export function useConversationSocket({
   const [connection, setConnection] = useState({ conversationId: null, state: "idle" });
   const [sendingConversationId, setSendingConversationId] = useState("");
   const [agentStatus, setAgentStatus] = useState(null); // {conversationId, status, agent, tool}
+  const [progress, setProgress] = useState({ conversationId: null, state: null }); // checklist (turnProgress.js)
   const onResyncRef = useRef(onResync);
   useEffect(() => {
     onResyncRef.current = onResync;
@@ -87,34 +103,75 @@ export function useConversationSocket({
     let hasConnectedBefore = false;
 
     const isCurrent = (s) => !stopped && socketRef.current === s;
+    const step = (event) =>
+      setProgress((current) => ({
+        conversationId,
+        state: progressReducer(current.conversationId === conversationId ? current.state : null, event),
+      }));
+
+    // ---- delta batching: one state update per animation frame ----
+    let buffered = null; // { text, agent }
+    let frame = 0;
+    let writing = false; // "Writing the answer" step already shown for this turn
+    const flush = () => {
+      frame = 0;
+      if (!buffered) return;
+      const { text, agent } = buffered;
+      buffered = null;
+      updateMessages(conversationId, (messages) => appendDraft(messages, text, agent));
+    };
+    const flushNow = () => {
+      if (frame) window.cancelAnimationFrame(frame);
+      flush();
+    };
+
     const finishTurn = () => {
+      flushNow();
+      writing = false;
       setSendingConversationId((c) => (c === conversationId ? "" : c));
       setAgentStatus(null);
+      setProgress({ conversationId, state: null });
     };
 
     const handleMessage = (event) => {
       const payload = JSON.parse(event.data);
       const data = payload.data || {};
 
+      if (payload.type === "turn_state") {
+        // Replay after (re)connecting: a reply may be mid-stream on the server.
+        const current = data.current;
+        if (current?.status === "running") {
+          setSendingConversationId(conversationId);
+          if (current.draft) {
+            writing = true;
+            updateMessages(conversationId, (messages) =>
+              appendDraft(messages.filter((m) => m.id !== DRAFT_ID), current.draft, current.agent)
+            );
+          }
+          setProgress({ conversationId, state: progressFromSnapshot(current) });
+        }
+        return;
+      }
+
       if (payload.type === "agent_status") {
         setAgentStatus({ conversationId, status: data.status, agent: data.agent, tool: data.tool });
+        step(data);
         return;
       }
 
       if (payload.type === "chat_delta") {
-        updateMessages(conversationId, (messages) => {
-          if (messages.some((m) => m.id === DRAFT_ID)) {
-            return messages.map((m) => (m.id === DRAFT_ID ? { ...m, content: m.content + data.text } : m));
-          }
-          return [
-            ...messages,
-            { id: DRAFT_ID, role: "assistant", content: data.text, agent_name: data.agent, streaming: true, created_at: new Date().toISOString() },
-          ];
-        });
+        if (!writing) {
+          writing = true;
+          step({ status: "writing", agent: data.agent });
+        }
+        if (!buffered) buffered = { text: "", agent: data.agent };
+        buffered.text += data.text;
+        if (!frame) frame = window.requestAnimationFrame(flush);
         return;
       }
 
       if (payload.type === "chat") {
+        flushNow(); // apply any buffered text before the saved message replaces the draft
         const aiMessage = { ...data.ai_message, error: data.error === true };
         updateMessages(conversationId, (messages) => replaceWithSaved(messages, data.user_message, aiMessage));
         finishTurn();
@@ -123,6 +180,7 @@ export function useConversationSocket({
       }
 
       if (payload.type === "error") {
+        flushNow();
         updateMessages(conversationId, (messages) => messages.filter((m) => !m.pending && m.id !== DRAFT_ID));
         finishTurn();
         setStatusMessage(payload.detail || "Failed to process the message.", "error");
@@ -158,7 +216,8 @@ export function useConversationSocket({
         attempt = 0;
         setConnection({ conversationId, state: "connected" });
         if (hasConnectedBefore) {
-          // We were offline: a reply may have finished meanwhile. Reload from the server.
+          // We were offline: a reply may have finished meanwhile. Reload saved messages;
+          // a reply still running is restored by the turn_state event that follows.
           finishTurn();
           updateMessages(conversationId, (messages) => messages.filter((m) => m.id !== DRAFT_ID));
           onResyncRef.current?.(conversationId);
@@ -192,6 +251,7 @@ export function useConversationSocket({
 
     return () => {
       stopped = true;
+      if (frame) window.cancelAnimationFrame(frame);
       window.clearTimeout(retryTimer);
       window.removeEventListener("online", onOnline);
       if (socket) socket.close();
@@ -228,6 +288,7 @@ export function useConversationSocket({
 
   return {
     agentStatus: agentStatus?.conversationId === selectedConversationId ? agentStatus : null,
+    progress: progress.conversationId === selectedConversationId ? progress.state : null,
     connectionState,
     isSending: !!selectedConversationId && sendingConversationId === selectedConversationId,
     sendMessage,
