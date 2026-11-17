@@ -26,10 +26,13 @@ from app.models import Conversation, File, User
 from app.services.file_processing.file_ingestion import ingest_file
 from app.services.llm.llm_service import _call_model
 from app.services.metrics.collector import TurnCollector, current_turn
-from evals.graders import grade_routing, grade_tools, parse_judge
+from app.services.rag.retriever import retrieve_pipeline
+from evals.graders import grade_retrieval, grade_routing, grade_tools, parse_judge
 
 EVAL_EMAIL = "evals@example.com"
 FIXTURES = Path(__file__).parent / "fixtures"
+# Recall alone rewards dumping whole files into the prompt; a retrieval also has a cost.
+RETRIEVAL_CONTEXT_BUDGET = 6000  # characters (~1.5k tokens) of file context per turn
 JUDGE_PROMPT = """You are a strict grader. Compare the ANSWER to the REFERENCE facts for the QUESTION.
 Score each 1-5:
 - correctness: are the reference facts present and correct? (5 = all correct, 1 = wrong/missing)
@@ -38,7 +41,7 @@ Score each 1-5:
 Return ONLY JSON: {"correctness": n, "grounding": n, "format": n, "reason": "one sentence"}"""
 
 
-async def setup_workspace() -> tuple[str, str]:
+async def setup_workspace(fixtures: Path = FIXTURES) -> tuple[str, str]:
     """Eval user + a fresh conversation with the fixture files ingested."""
     async with AsyncSessionLocal() as db:
         user = (await db.execute(select(User).where(User.email == EVAL_EMAIL))).scalar_one_or_none()
@@ -55,7 +58,7 @@ async def setup_workspace() -> tuple[str, str]:
         upload_dir = BACKEND_ROOT / "uploads"
         upload_dir.mkdir(exist_ok=True)
         jobs = []
-        for path in sorted(FIXTURES.iterdir()):
+        for path in sorted(p for p in fixtures.iterdir() if p.is_file()):
             target = upload_dir / f"{uuid.uuid4()}_{path.name}"
             shutil.copy(path, target)
             record = File(conversation_id=conversation.id, user_id=user.id, filename=path.name,
@@ -122,4 +125,23 @@ async def run_answers(cases: list[dict], user_id: str, conversation_id: str) -> 
             results.append({"id": case["id"], "agent": case["agent"], **verdict, "answer": answer[:400]})
         except Exception as exc:
             results.append({"id": case["id"], "agent": case["agent"], "passed": False, "error": str(exc)[:200]})
+    return results
+
+
+async def run_retrieval(cases: list[dict], user_id: str, conversation_id: str) -> list[dict]:
+    """
+    Retrieval only (no LLM): is every expected snippet in the context the agent
+    would receive? Uses its own conversation with long, confusable fixtures so
+    the other suites' workspace stays unchanged.
+    """
+    user_id, conversation_id = await setup_workspace(FIXTURES / "retrieval")
+    results = []
+    for case in cases:
+        async with AsyncSessionLocal() as db:
+            context = await retrieve_pipeline(case["query"], [], uuid.UUID(conversation_id), uuid.UUID(user_id), db)
+        missing = grade_retrieval(context, case["expect"])
+        over_budget = len(context) > RETRIEVAL_CONTEXT_BUDGET
+        problems = missing + ([f"context {len(context)} chars > budget {RETRIEVAL_CONTEXT_BUDGET}"] if over_budget else [])
+        results.append({"id": case["id"], "group": case.get("group"), "passed": not problems,
+                        "problems": problems, "context_chars": len(context)})
     return results

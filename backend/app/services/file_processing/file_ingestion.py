@@ -11,7 +11,7 @@ from uuid import UUID
 from loguru import logger
 
 from app.db.database import sync_session_scope
-from app.models.chunks import Chunk
+from app.models.chunks import Chunk, ChunkParent
 from app.models.file import File
 from app.services.embeddings.embedding_utils import embed_texts
 from app.services.file_processing.file_processing_service import process_and_chunk
@@ -26,30 +26,51 @@ def _set_file_status(file_id: UUID, status: str) -> None:
             sync_db.commit()
 
 
-def _normalize_processed_chunks(chunks):
+def _normalize_processed_chunks(chunks) -> list[dict]:
+    """-> [{"content", "metadata", "parent_content" (optional)}], empty chunks dropped."""
     processed_chunks = []
     for chunk in chunks:
         if isinstance(chunk, str):
-            content, file_metadata = chunk.strip(), {}
+            item = {"content": chunk.strip(), "metadata": {}}
         elif isinstance(chunk, dict):
-            content, file_metadata = chunk["content"], chunk["metadata"]
+            item = {"content": chunk["content"], "metadata": chunk.get("metadata") or {},
+                    "parent_content": chunk.get("parent_content")}
         else:
             logger.warning("Skipping invalid chunk type {}", type(chunk).__name__)
             continue
-        if content:
-            processed_chunks.append((content, file_metadata))
+        if item["content"]:
+            processed_chunks.append(item)
 
     if not processed_chunks and chunks:
         raise ValueError("No valid chunks were produced during file processing")
     return processed_chunks
 
 
-def _build_chunk_instances(file_id: UUID, processed_chunks):
-    embeddings = embed_texts([content for content, _ in processed_chunks]) if processed_chunks else []
-    return [
-        Chunk(file_id=file_id, content=content, file_metadata=file_metadata, embedding=embedding)
-        for (content, file_metadata), embedding in zip(processed_chunks, embeddings)
-    ]
+def embedding_text(item: dict) -> str:
+    """
+    Contextual header: a child from the middle of a section doesn't contain the
+    section title, so embed "title + child". Stored content stays the plain child.
+    """
+    title = (item["metadata"].get("section_title") or "").strip()
+    if title and not item["content"].lstrip("# ").startswith(title):
+        return f"{title}\n{item['content']}"
+    return item["content"]
+
+
+def _build_rows(file_id: UUID, processed_chunks: list[dict]) -> tuple[list[ChunkParent], list[Chunk]]:
+    embeddings = embed_texts([embedding_text(item) for item in processed_chunks]) if processed_chunks else []
+    parents: dict[str, ChunkParent] = {}
+    chunks = []
+    for item, embedding in zip(processed_chunks, embeddings):
+        parent_id = None
+        parent_key = item["metadata"].get("parent_key")
+        if item.get("parent_content") and parent_key is not None:
+            if parent_key not in parents:
+                parents[parent_key] = ChunkParent(file_id=file_id, content=item["parent_content"])
+            parent_id = parents[parent_key].id
+        chunks.append(Chunk(file_id=file_id, content=item["content"], file_metadata=item["metadata"],
+                            embedding=embedding, parent_id=parent_id))
+    return list(parents.values()), chunks
 
 
 def ingest_file(file_id: str, file_path: str) -> int:
@@ -60,8 +81,10 @@ def ingest_file(file_id: str, file_path: str) -> int:
     try:
         chunks = process_and_chunk(file_path)
         processed_chunks = _normalize_processed_chunks(chunks)
-        chunk_instances = _build_chunk_instances(file_uuid, processed_chunks)
+        parent_rows, chunk_instances = _build_rows(file_uuid, processed_chunks)
         with sync_session_scope() as sync_db:
+            sync_db.add_all(parent_rows)
+            sync_db.flush()  # parents first: chunks reference them
             sync_db.add_all(chunk_instances)
             sync_db.commit()
         _set_file_status(file_uuid, "processed")

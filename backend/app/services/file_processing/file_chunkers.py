@@ -13,41 +13,18 @@ def clean_pdf_text(text: str) -> str:
     text = re.sub(r"\s+", " ", text)
     return text.strip()
 
-def chunk_sections(sections: List[Dict]) -> List[Dict]:
-    splitter = RecursiveCharacterTextSplitter(
-        chunk_size=500,
-        chunk_overlap=100
-    )
-
-    final_chunks = []
-
+def sections_to_units(sections: List[Dict]) -> List[Dict]:
+    """PDF sections -> logical units for build_hierarchy (title kept in the text)."""
+    units = []
     for section in sections:
-        full_text = " ".join(section["content"])
-        split_chunks = splitter.split_text(full_text)
-
-        # Title chunk (IMPORTANT)
-        final_chunks.append({
-            "content": section["title"],
-            "metadata": {
-                "section_title": section["title"],
-                "section_id": section["section_id"],
-                "is_title": True
-            }
+        body = " ".join(section["content"]).strip()
+        title = (section.get("title") or "").strip()
+        units.append({
+            "content": f"{title}\n\n{body}".strip() if title else body,
+            "metadata": {"section_title": title, "section_id": section["section_id"]} if title
+            else {"section_id": section["section_id"]},
         })
-
-        # Content chunks
-        for i, chunk in enumerate(split_chunks):
-            final_chunks.append({
-                "content": chunk,
-                "metadata": {
-                    "section_title": section["title"],
-                    "section_id": section["section_id"],
-                    "chunk_index": i,
-                    "is_title": False
-                }
-            })
-
-    return final_chunks
+    return units
 
 def chunk_markdown_and_docx(text: str):
     headers_to_split_on = [
@@ -78,14 +55,6 @@ def chunk_markdown_and_docx(text: str):
             metadata["section_id"] = " > ".join(doc.metadata.values())
         chunks.append({"content": content, "metadata": metadata})
     return chunks
-
-def chunk_txt(text: str):
-    splitter = RecursiveCharacterTextSplitter(
-        chunk_size=500,
-        chunk_overlap=100,
-        separators=["\n\n", "\n", ".", " ", ""],
-    )
-    return splitter.split_text(text)
 
 def recursive_character_chunking_for_images(text: str, chunk_size: int = 1000, overlap: int = 200) -> list[str]:
     chunks = []

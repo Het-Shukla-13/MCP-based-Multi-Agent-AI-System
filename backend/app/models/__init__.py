@@ -4,7 +4,7 @@ from app.models.message import Message
 from app.models.file import File
 from app.models.memory import Memory
 from app.models.user_profile_snapshot import UserProfileSnapshot
-from app.models.chunks import Chunk
+from app.models.chunks import Chunk, ChunkParent
 from app.models.refresh_token import RefreshToken
 from app.models.metrics import LlmCall, TurnMetric
 

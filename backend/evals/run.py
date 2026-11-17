@@ -22,7 +22,8 @@ from evals import harness
 from evals.graders import summarize
 
 ROOT = Path(__file__).parent
-SUITES = {"routing": harness.run_routing, "tools": harness.run_tools, "answers": harness.run_answers}
+SUITES = {"routing": harness.run_routing, "tools": harness.run_tools, "answers": harness.run_answers,
+          "retrieval": harness.run_retrieval}
 BASELINE = ROOT / "baseline.json"
 
 
