@@ -36,6 +36,14 @@ One note per branch, in the order the work was done. Each note covers: the conce
 | 30 | `feature/fe-e2e-tests` | Playwright test runner, isolation, web-first assertions, flaky vs real bugs |
 | 31 | `docs/fe-readme` | Documentation for users and future developers |
 | 32 | `chore/single-env` | One config file, URL-encoding credentials, env_file trade-off |
+| 33 | `feature/turn-metrics` | Per-turn latency/tokens/tools via a ContextVar collector, batched writer, p50/p95, PII redaction |
+| 34 | `feature/agent-evals` | JSONL eval suites, pure graders, LLM judge on a different model, baseline + regression exit code |
+| 35 | `feature/prompts-as-files` | Prompts in Markdown with includes/placeholders; byte-identical refactor proof; `.gitignore` trap |
+| 36 | `feature/turn-runner` | Server-owned turns: per-conversation lanes, Stop keeps the draft, queue, heartbeat + sweeper, replay |
+| 37 | `feature/tool-confirmation` | Approve/reject/revise side-effect tools by awaiting in the tool callback; opt-in capability |
+| 38 | `feature/parallel-tools` | Blocking calls in async MCP tools, readers-writer tool scheduler, interval-union tool time |
+| 39 | `feature/hybrid-retrieval` | Retrieval eval with a context budget, parent/child chunks, weighted RRF hybrid search, HTTP timeouts |
+| 40 | `feature/layered-compaction` | View-only L0-L4 history compaction, background summary, atomic JSONB patches, graceful degradation |
 
 ## Branching workflow
 - `develop-be` is cut from `main`, with the latest feature branch merged in.
