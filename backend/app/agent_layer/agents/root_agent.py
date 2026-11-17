@@ -42,6 +42,7 @@ from app.agent_layer.core.base import (
     run_config,
     emit_tool_events,
     is_retryable_provider_error,
+    wait_for_quota,
 )
 from app.agent_layer.schemas import AgentContext, AgentResponse
 from app.core.config import settings
@@ -133,6 +134,13 @@ class RootAgent:
                 turn = current_turn.get()
                 if turn is not None:
                     turn.fallback_used = True
+        # Every model rate-limited in the same minute: wait the provider's suggested
+        # delay (if short) and retry the primary pair once instead of failing the turn.
+        if last_exc is not None and await wait_for_quota(last_exc, on_status, ROOT_NAME):
+            try:
+                return await self._delegate(context, attempts[0][0], attempts[0][1], emit, on_status)
+            except Exception as exc:
+                last_exc = exc
         raise AgentExecutionError(ROOT_NAME, last_exc)
 
     async def _delegate(self, context, router_model, agent_model, emit, on_status) -> AgentResponse:

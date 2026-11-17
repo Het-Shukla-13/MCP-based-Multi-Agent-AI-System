@@ -83,3 +83,13 @@ def test_routing_bookkeeping_turns_are_removed_from_sub_agent_input():
     strip_routing_context(None, request)
     assert [[p.text for p in c.parts][0] for c in request.contents] == ["Say hi", "For context:"]
     assert "transfer_to_agent" not in str([p.text for c in request.contents for p in c.parts])
+
+
+def test_quota_retry_delay_parses_provider_hint():
+    from app.agent_layer.core.base import quota_retry_delay
+
+    assert quota_retry_delay(Exception("429 RESOURCE_EXHAUSTED {'retryDelay': '12s'}")) == 12.5
+    assert quota_retry_delay(Exception("Rate limited, please retry in 3.2 s")) is None  # no 429 marker
+    assert quota_retry_delay(Exception("429 Too Many Requests, retry in 3.2s")) == 3.7
+    assert quota_retry_delay(Exception("429 RESOURCE_EXHAUSTED")) == 10.0  # no hint: default
+    assert quota_retry_delay(Exception("503 UNAVAILABLE")) is None

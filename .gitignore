@@ -31,3 +31,6 @@ logs/
 backend/test*.py
 backend/inspect*.py
 !docs/learning/*.md
+
+# Eval run outputs (baseline.json is committed)
+backend/evals/results/

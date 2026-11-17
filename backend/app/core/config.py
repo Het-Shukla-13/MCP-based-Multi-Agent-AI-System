@@ -53,6 +53,8 @@ class Settings(BaseSettings):
     # free-tier per-model quota: one chat turn = 1 router call + 1 agent call.
     ROUTER_MODEL: str = "gemini-3.5-flash-lite"
     ROUTER_FALLBACK_MODEL: str | None = "gemini-3.1-flash-lite"
+    # Eval judge: a DIFFERENT model family than the agents (limits self-preference bias).
+    EVAL_JUDGE_MODEL: str = "openai/gpt-oss-20b"
     GROQ_API_KEY: str | None = None
     GEMINI_API_KEY: str | None = None
     LLM_TEMPERATURE: float = 0.1
