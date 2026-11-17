@@ -5,6 +5,7 @@ Deliberately NO "run this pandas code" tool: executing model-written code on the
 server would be remote code execution. Each tool is a fixed, validated operation.
 """
 
+import asyncio
 import os
 
 import pandas as pd
@@ -25,16 +26,21 @@ async def _load(user_id: str, conversation_id: str, file_name: str, sheet: str =
     target, error = await resolve_owned_file(user_id, conversation_id, file_name)
     if target is None:
         return None, error
-    ext = os.path.splitext(target.filename)[1].lower()
+    # File parsing runs in a thread so concurrent calls to this server keep moving.
+    return await asyncio.to_thread(_read_table, target.storage_path, target.filename, sheet)
+
+
+def _read_table(path: str, filename: str, sheet: str) -> tuple[pd.DataFrame | None, str]:
+    ext = os.path.splitext(filename)[1].lower()
     if ext == ".csv":
-        return read_csv_robust(target.storage_path), ""
+        return read_csv_robust(path), ""
     if ext == ".xlsx":
-        sheets = pd.ExcelFile(target.storage_path).sheet_names
+        sheets = pd.ExcelFile(path).sheet_names
         name = sheet or sheets[0]
         if name not in sheets:
             return None, f"Sheet '{sheet}' not found. Sheets: {', '.join(sheets)}"
-        return pd.read_excel(target.storage_path, sheet_name=name), ""
-    return None, f"'{target.filename}' is not a CSV/XLSX file."
+        return pd.read_excel(path, sheet_name=name), ""
+    return None, f"'{filename}' is not a CSV/XLSX file."
 
 
 def _check_columns(df: pd.DataFrame, *columns: str) -> str:

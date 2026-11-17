@@ -1,5 +1,6 @@
 """Code MCP server: static analysis (structure, syntax errors, metrics). Never executes code."""
 
+import asyncio
 import ast
 import os
 
@@ -82,7 +83,7 @@ async def analyze_code(code: str = "", language: str = "python", file_name: str 
             code = fh.read()
     if not code.strip():
         return "Provide `code` or the `file_name` of an uploaded code file."
-    return _analyze(code, language)
+    return await asyncio.to_thread(_analyze, code, language)
 
 
 if __name__ == "__main__":

@@ -7,6 +7,7 @@ user_id / conversation_id are injected by the agent layer (before_tool_callback)
 and overwrite whatever the model passes, so a prompt cannot reach other users' files.
 """
 
+import asyncio
 import os
 
 import pandas as pd
@@ -86,7 +87,9 @@ async def read_file(file_name: str, max_chars: int = 8000, user_id: str = "", co
         return f"No uploaded file matches '{file_name}'. Use list_files to see the available files."
     if not os.path.exists(target.storage_path):
         return f"The file '{target.filename}' is no longer available on the server."
-    text = _extract_text(target.storage_path, os.path.splitext(target.filename)[1].lower())
+    # Parsing (PDF/DOCX) and image OCR (a blocking Gemini call) run in a thread:
+    # inline they froze every other call to this server for seconds.
+    text = await asyncio.to_thread(_extract_text, target.storage_path, os.path.splitext(target.filename)[1].lower())
     return f"# {target.filename}\n\n" + truncate(text, max(500, min(max_chars, 20_000)))
 
 
