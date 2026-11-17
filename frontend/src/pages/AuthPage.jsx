@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { errorMessage, login, register } from "../lib/api";
 import { setSession } from "../lib/auth";
+import ThemeToggle from "../components/ThemeToggle";
 
 export default function AuthPage() {
   const [mode, setMode] = useState("login");
@@ -30,6 +31,7 @@ export default function AuthPage() {
 
   return (
     <div className="auth-shell">
+      <div className="auth-shell__theme"><ThemeToggle /></div>
       <form className="auth-card" onSubmit={submit}>
         <p className="sidebar__eyebrow">Multi-Agent Assistant</p>
         <h1>{isRegister ? "Create your account" : "Sign in"}</h1>

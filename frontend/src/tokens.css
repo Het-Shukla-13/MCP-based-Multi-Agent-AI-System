@@ -1,0 +1,207 @@
+/*
+ * Design tokens. Components use ONLY the semantic tokens below (never raw colours),
+ * so a theme is just a different set of values for the same names.
+ *
+ * Direction: warm, light and calm. Warm off-white surfaces, soft borders instead
+ * of heavy shadows, one friendly teal accent, and gentle tinted status colours.
+ * Dark mode is warm charcoal (not cold navy).
+ *
+ * Theme selection: <html data-theme="light|dark"> is set before first paint by
+ * the inline script in index.html (no flash). Without it, the OS preference wins.
+ */
+
+/* ---------- scales (theme-independent) ---------- */
+:root {
+  --font-sans: "Inter Variable", "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+
+  --text-xs: 0.75rem;     /* 12px: timestamps, badges */
+  --text-sm: 0.8125rem;   /* 13px: secondary UI text */
+  --text-base: 0.9375rem; /* 15px: UI default */
+  --text-md: 1rem;        /* 16px: reading text */
+  --text-lg: 1.125rem;
+  --text-xl: 1.375rem;
+  --text-2xl: 1.75rem;
+
+  --leading-tight: 1.25;
+  --leading-normal: 1.5;
+  --leading-relaxed: 1.65; /* long-form answers */
+
+  --weight-regular: 400;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 20px;
+  --radius-pill: 999px;
+
+  --duration-fast: 120ms;
+  --duration: 200ms;
+  --ease: cubic-bezier(0.2, 0, 0, 1);
+
+  --sidebar-width: 288px;
+  --reading-width: 760px;
+}
+
+/* ---------- light (default) ---------- */
+:root,
+:root[data-theme="light"] {
+  color-scheme: light;
+
+  --bg: #faf8f5;
+  --surface: #ffffff;
+  --surface-raised: #ffffff;
+  --surface-subtle: #f4f1ec;
+  --surface-sunken: #f1eee8;
+  --surface-hover: #efebe4;
+  --input-bg: #ffffff;
+  --overlay: rgba(28, 25, 20, 0.32);
+
+  --border: #e7e2d9;
+  --border-strong: #d7d0c3;
+
+  --text: #22201c;
+  --text-secondary: #4a463f;
+  --text-muted: #6d675f;
+  --text-on-accent: #ffffff;
+
+  --accent: #0c7a6e;
+  --accent-hover: #09665c;
+  --accent-text: #0b7165;
+  --accent-soft: #e2f3ef;
+  --accent-border: #9fd6cc;
+
+  --user-bubble: #e9f4f1;
+  --user-bubble-border: #cfe7e1;
+
+  --success: #1f8a55;
+  --success-text: #17673f;
+  --success-soft: #e5f3eb;
+  --warning: #b7791f;
+  --warning-text: #7f5410;
+  --warning-soft: #fbf1dc;
+  --danger: #c4453b;
+  --danger-text: #9b2f27;
+  --danger-soft: #fbe9e6;
+  --danger-border: #f0c4bd;
+
+  --code-bg: #f6f3ee;
+  --code-text: #2b2722;
+
+  --shadow-sm: 0 1px 2px rgba(40, 32, 20, 0.05);
+  --shadow-md: 0 4px 16px rgba(40, 32, 20, 0.08);
+  --shadow-lg: 0 12px 32px rgba(40, 32, 20, 0.12);
+  --focus-ring: 0 0 0 3px rgba(12, 122, 110, 0.28);
+}
+
+/* ---------- dark ---------- */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --bg: #161615;
+  --surface: #1e1e1c;
+  --surface-raised: #252523;
+  --surface-subtle: #232321;
+  --surface-sunken: #121211;
+  --surface-hover: #2c2c29;
+  --input-bg: #121211;
+  --overlay: rgba(0, 0, 0, 0.55);
+
+  --border: #31302d;
+  --border-strong: #3f3e3a;
+
+  --text: #edebe7;
+  --text-secondary: #cfccc6;
+  --text-muted: #9c988f;
+  --text-on-accent: #0c1f1c;
+
+  --accent: #3cc2ae;
+  --accent-hover: #5fd3c1;
+  --accent-text: #6fd6c6;
+  --accent-soft: rgba(60, 194, 174, 0.14);
+  --accent-border: rgba(60, 194, 174, 0.45);
+
+  --user-bubble: #1d2b28;
+  --user-bubble-border: #2b403b;
+
+  --success: #4cc38a;
+  --success-text: #7dd8aa;
+  --success-soft: rgba(76, 195, 138, 0.14);
+  --warning: #e0a744;
+  --warning-text: #f0c879;
+  --warning-soft: rgba(224, 167, 68, 0.14);
+  --danger: #ec7166;
+  --danger-text: #f3a49c;
+  --danger-soft: rgba(236, 113, 102, 0.14);
+  --danger-border: rgba(236, 113, 102, 0.4);
+
+  --code-bg: #121211;
+  --code-text: #e6e3dd;
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.35);
+  --shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.45);
+  --focus-ring: 0 0 0 3px rgba(60, 194, 174, 0.35);
+}
+
+/* No explicit choice yet: follow the OS (the inline script normally sets one). */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) {
+    color-scheme: dark;
+    --bg: #161615;
+    --surface: #1e1e1c;
+    --surface-raised: #252523;
+    --surface-subtle: #232321;
+    --surface-sunken: #121211;
+    --surface-hover: #2c2c29;
+    --input-bg: #121211;
+    --overlay: rgba(0, 0, 0, 0.55);
+    --border: #31302d;
+    --border-strong: #3f3e3a;
+    --text: #edebe7;
+    --text-secondary: #cfccc6;
+    --text-muted: #9c988f;
+    --text-on-accent: #0c1f1c;
+    --accent: #3cc2ae;
+    --accent-hover: #5fd3c1;
+    --accent-text: #6fd6c6;
+    --accent-soft: rgba(60, 194, 174, 0.14);
+    --accent-border: rgba(60, 194, 174, 0.45);
+    --user-bubble: #1d2b28;
+    --user-bubble-border: #2b403b;
+    --success: #4cc38a;
+    --success-text: #7dd8aa;
+    --success-soft: rgba(76, 195, 138, 0.14);
+    --warning: #e0a744;
+    --warning-text: #f0c879;
+    --warning-soft: rgba(224, 167, 68, 0.14);
+    --danger: #ec7166;
+    --danger-text: #f3a49c;
+    --danger-soft: rgba(236, 113, 102, 0.14);
+    --danger-border: rgba(236, 113, 102, 0.4);
+    --code-bg: #121211;
+    --code-text: #e6e3dd;
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+    --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.35);
+    --shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.45);
+    --focus-ring: 0 0 0 3px rgba(60, 194, 174, 0.35);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --duration-fast: 0ms;
+    --duration: 0ms;
+  }
+}
