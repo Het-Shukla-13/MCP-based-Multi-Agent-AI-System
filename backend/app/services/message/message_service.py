@@ -1,3 +1,5 @@
+import asyncio
+
 from sqlalchemy.ext.asyncio import AsyncSession
 from loguru import logger
 from time import perf_counter
@@ -215,6 +217,9 @@ async def send_message(
             error=result["error"],
         )
         return result
+    except asyncio.CancelledError:  # Stop pressed: not an error, still a measured turn
+        collector.finish(message_id=None, agent_name=None, error=False)
+        raise
     except Exception:
         collector.finish(message_id=None, agent_name=None, error=True)
         raise
@@ -240,6 +245,11 @@ async def _send_message(
         "Chat timing | stage=create_user_message | duration_min={}",
         elapsed_minutes(create_user_started_at),
     )
+
+    # The turn runner records this id so a stopped/interrupted turn can still be
+    # answered (partial text) instead of leaving the question dangling.
+    if on_status is not None:
+        await on_status({"status": "accepted", "user_message_id": str(user_message.id)})
 
     # Profile extraction runs in the background: it doesn't affect this reply.
     schedule_profile_snapshot_update(user_message)

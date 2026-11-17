@@ -9,3 +9,4 @@ from app.models.refresh_token import RefreshToken
 from app.models.metrics import LlmCall, TurnMetric
 
 __all__ = ["User", "Conversation", "Message", "File", "Memory", "UserProfileSnapshot", "Chunk"]
+from app.models.turn import ChatTurn
