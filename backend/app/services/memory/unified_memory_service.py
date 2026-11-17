@@ -11,7 +11,7 @@ from app.core.config import settings
 from app.services.memory.context_router import ContextPolicy, build_context_policy
 from app.services.memory.ltm_service import search_memories_with_scores
 from app.services.user_profile.user_profile_cache_service import get_cached_user_profile_text
-from app.services.memory.memory_services import build_smart_history, get_stm_state
+from app.services.memory.memory_services import SUMMARY_PREFIX, build_smart_history, get_stm_state
 from app.services.time.timing import elapsed_minutes, log_async_timing
 
 
@@ -127,7 +127,7 @@ def _is_stm_summary_message(message: Message) -> bool:
     return (
         getattr(message, "role", "") == "system"
         and (getattr(message, "content", "") or "").startswith(
-            "Compressed memory from earlier conversation."
+            SUMMARY_PREFIX
         )
     )
 
@@ -205,7 +205,7 @@ async def build_unified_memory_context(
     )
 
     smart_history_started_at = perf_counter()
-    messages, stm_state, _ = await build_smart_history(
+    messages, stm_patch, _ = await build_smart_history(
         raw_messages,
         convo_metadata=conversation.convo_metadata,
     )
@@ -321,8 +321,9 @@ async def build_unified_memory_context(
     )
 
     stm_summary_started_at = perf_counter()
-    # Use the state we just computed (the stored metadata is one turn behind).
-    stm_summary = stm_state.get("rolling_summary", "")
+    # The summary is refreshed in the background after each turn (layer L3), so
+    # the stored one is what this turn uses: no LLM call on the hot path.
+    stm_summary = get_stm_state(conversation.convo_metadata).get("rolling_summary", "")
     logger.info(
         "Unified memory timing | stage=get_stm_summary | duration_min={}",
         elapsed_minutes(stm_summary_started_at),
@@ -330,7 +331,7 @@ async def build_unified_memory_context(
 
     return UnifiedMemoryContext(
         messages=messages,
-        stm_state=stm_state,
+        stm_state=stm_patch,
         stm_summary=stm_summary,
         context_policy=context_policy,
         ltm_results=ltm_results,

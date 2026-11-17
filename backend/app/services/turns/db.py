@@ -8,8 +8,8 @@ from uuid import UUID
 from fastapi.encoders import jsonable_encoder
 from sqlalchemy import select, update
 
-from app.agent_layer.core.state import set_active_agent
-from app.crud.conversation import get_conversation, update_conversation_metadata
+from app.agent_layer.core.state import AGENT_STATE_KEY, set_active_agent
+from app.crud.conversation import get_conversation, patch_conversation_metadata
 from app.crud.message import create_message, get_message
 from app.db.database import AsyncSessionLocal
 from app.models import ChatTurn
@@ -144,7 +144,7 @@ class ChatTurnExecutor:
             ai = await _answer(db, user_message, content, turn.agent, "stopped")
             if turn.agent:  # keep follow-ups sticky to the agent that was answering
                 conversation = await get_conversation(db, turn.conversation_id)
-                await update_conversation_metadata(
-                    db, turn.conversation_id, set_active_agent(conversation.convo_metadata, turn.agent))
+                state = set_active_agent(conversation.convo_metadata, turn.agent)[AGENT_STATE_KEY]
+                await patch_conversation_metadata(db, turn.conversation_id, {AGENT_STATE_KEY: state})
             return chat_event_data(turn.conversation_id, user_message, ai,
                                    turn.agent or "general", False, False)

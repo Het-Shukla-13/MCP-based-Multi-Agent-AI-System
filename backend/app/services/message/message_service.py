@@ -7,11 +7,10 @@ from time import perf_counter
 from app.models import Message
 from app.schemas.message import MessageCreate
 from app.crud.message import create_message
-from app.crud.conversation import get_conversation, update_conversation_metadata
+from app.crud.conversation import get_conversation, patch_conversation_metadata
 from app.services.llm import llm
 from app.services.rag.retriever import retrieve_pipeline
 from app.services.memory.unified_memory_service import build_unified_memory_context
-from app.services.memory.memory_services import set_stm_state
 from app.services.time.timing import elapsed_minutes, log_async_timing
 from app.services.tokenization.token_service import get_message_token_count
 from app.prompts import CHAT_SYSTEM_PROMPT
@@ -23,7 +22,7 @@ from app.agent_layer.agents.root_agent import AgentExecutionError, RootAgent, St
 from app.agent_layer.core.mentions import parse_agent_mention
 from app.services.metrics.collector import TurnCollector, current_turn
 from app.agent_layer.schemas import AgentContext, HistoryMessage
-from app.agent_layer.core.state import get_agent_state, set_active_agent
+from app.agent_layer.core.state import AGENT_STATE_KEY, get_agent_state, set_active_agent
 
 root_agent = RootAgent()
 
@@ -269,12 +268,8 @@ async def _send_message(
 
     conversation = await get_conversation(db, payload.conversation_id)
     update_stm_started_at = perf_counter()
-    updated_metadata = set_stm_state(conversation.convo_metadata, unified_memory.stm_state)
-    await update_conversation_metadata(
-        db,
-        payload.conversation_id,
-        updated_metadata,
-    )
+    # Atomic patch of the turn-owned STM keys (the background summary job owns the others).
+    await patch_conversation_metadata(db, payload.conversation_id, unified_memory.stm_state, under="stm")
     logger.info(
         "Chat timing | stage=update_stm_state | duration_min={}",
         elapsed_minutes(update_stm_started_at),
@@ -345,8 +340,8 @@ async def _send_message(
         answered_by = agent_response.agent_name
         ai_content = agent_response.content
         generated_file_ids = agent_response.generated_file_ids
-        updated_metadata = set_active_agent(conversation.convo_metadata, answered_by)
-        await update_conversation_metadata(db, payload.conversation_id, updated_metadata)
+        agent_state = set_active_agent(conversation.convo_metadata, answered_by)[AGENT_STATE_KEY]
+        await patch_conversation_metadata(db, payload.conversation_id, {AGENT_STATE_KEY: agent_state})
     except AgentExecutionError as exc:
         # Keep the conversation consistent (every user message gets a reply) and
         # tell the user plainly, instead of a generic socket error and a dangling question.

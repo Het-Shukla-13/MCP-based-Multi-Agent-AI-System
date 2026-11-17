@@ -22,6 +22,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from loguru import logger
 from sqlalchemy import func, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
@@ -177,6 +178,11 @@ async def retrieve_similar_chunks(
 ):
     if not file_ids:
         return []
+    if query_embedding is None:
+        # Embeddings unavailable (quota/outage): keyword search needs no external
+        # API, so file questions still get an answer instead of a failed turn.
+        keyword = await _keyword_candidates(query_text, file_ids, conversation_id, user_id, db, CANDIDATES_PER_METHOD)
+        return await _to_passages(keyword, db, top_k, budget)
     ranked = await _vector_candidates(query_embedding, file_ids, conversation_id, user_id, db, CANDIDATES_PER_METHOD)
     if settings.RETRIEVAL_MODE == "hybrid":
         keyword = await _keyword_candidates(query_text, file_ids, conversation_id, user_id, db, CANDIDATES_PER_METHOD)
@@ -279,7 +285,11 @@ async def retrieve_pipeline(
             )
         return ""
 
-    user_query = await embed_text_async(query, task="query")
+    try:
+        user_query = await embed_text_async(query, task="query")
+    except Exception as exc:
+        logger.warning("Query embedding failed; keyword-only retrieval | error={}", str(exc)[:200])
+        user_query = None
     similar_chunks = await retrieve_similar_chunks(
         query,
         user_query,

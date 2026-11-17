@@ -7,7 +7,8 @@ from loguru import logger
 
 from app.core.config import settings
 from app.db.database import AsyncSessionLocal
-from app.crud.conversation import get_conversation, update_conversation_metadata
+from app.crud.conversation import get_conversation, patch_conversation_metadata
+from app.services.memory.memory_services import refresh_rolling_summary
 from app.services.memory.ltm_service import ComparisonBudget
 from app.services.memory.memory_promoter import (
     promote_memories_from_messages,
@@ -22,6 +23,8 @@ from app.services.user_profile.user_profile_cache_service import schedule_user_p
 from app.services.time.timing import elapsed_minutes, log_async_timing
 from time import perf_counter
 from app.services.conversation.conversation_metadata_service import merge_conversation_metadata
+
+METADATA_KEYS = ("topics", "entities", "active_goals", "sentiment", "summary_hint")
 
 _USER_LOCKS: dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
 _USER_TASKS: dict[str, asyncio.Task] = {}
@@ -67,6 +70,15 @@ async def run_memory_maintenance_pipeline(
                     "Chat timing | stage=fetch_updated_messages | duration_min={}",
                     elapsed_minutes(history_fetch_started_at),
                 )
+
+                # L3 compaction: fold messages that left the history view into the
+                # rolling summary (moved off the chat hot path; once per message).
+                try:
+                    full_history = await fetch_conversation_history(db, conversation_id, limit=200)
+                    conversation = await get_conversation(db, conversation_id)
+                    await refresh_rolling_summary(db, conversation_id, full_history, conversation.convo_metadata)
+                except Exception:
+                    logger.exception("Background maintenance | stage=stm_summary | failed")
 
                 comparison_budget = ComparisonBudget(
                     remaining=settings.MAINTENANCE_MAX_COMPARISONS_PER_RUN
@@ -121,11 +133,10 @@ async def run_memory_maintenance_pipeline(
                         refreshed_conversation.convo_metadata,
                         extracted_metadata.model_dump(),
                     )
-                    await update_conversation_metadata(
-                        db,
-                        conversation_id,
-                        merged_metadata,
-                    )
+                    # Patch only the keys this stage owns (atomic; never clobbers STM/agent state).
+                    await patch_conversation_metadata(db, conversation_id, {
+                        key: merged_metadata[key] for key in METADATA_KEYS if key in merged_metadata
+                    })
                     logger.info(
                         "Background maintenance | stage=conversation_metadata | topics={} | entities={} | goals={}",
                         len(merged_metadata.get("topics", [])),
