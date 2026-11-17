@@ -13,7 +13,8 @@ from docx import Document
 from fastapi import HTTPException
 from app.services.vision.vision_service import transcribe_image
 from app.services.file_processing.file_chunkers import *
-from app.services.file_processing.file_chunkers import chunk_sections
+from app.services.file_processing.file_chunkers import sections_to_units
+from app.services.file_processing.hierarchy import build_hierarchy
 
 MAX_OFFICE_UNCOMPRESSED_BYTES = 50 * 1024 * 1024
 
@@ -139,9 +140,7 @@ def process_pdf(file_path: str) -> List[Dict]:
     # if len(sections) <= 1:
     #     sections = fallback_detect_sections(md_text)
 
-    chunks = chunk_sections(sections)
-
-    return chunks
+    return build_hierarchy(sections_to_units(sections))
 
 def process_markdown(file_path: str) -> list[str]:
     with open(file_path, "r", encoding="utf-8") as f:
@@ -150,8 +149,7 @@ def process_markdown(file_path: str) -> list[str]:
     text = re.sub(r"\n{3,}", "\n\n", text)
     text = "\n".join([line.rstrip() for line in text.split("\n")])
     text = text.strip()
-    chunks=chunk_markdown_and_docx(text)
-    return chunks
+    return build_hierarchy(chunk_markdown_and_docx(text))
 
 def process_docx(file_path: str) -> list[str]:
     validate_office_archive(file_path)
@@ -174,14 +172,12 @@ def process_docx(file_path: str) -> list[str]:
         else:
             structured_text.append(para.text)
     content_str = "\n".join(structured_text)
-    chunks = chunk_markdown_and_docx(content_str)
-    return chunks
+    return build_hierarchy(chunk_markdown_and_docx(content_str))
 
 def process_text(file_path: str) -> list[str]:
     with open(file_path, "r", encoding="utf-8") as f:
         text= f.read()
-    chunks=chunk_txt(text)
-    return chunks
+    return build_hierarchy([{"content": text, "metadata": {}}])
 
 def process_image(file_path: str) -> list[str]:
     # Gemini vision instead of local Tesseract OCR: reads text AND describes charts/photos.

@@ -33,7 +33,7 @@ backend/inspect*.py
 !docs/learning/*.md
 # Markdown that is source code, not notes: prompts and eval fixtures
 !backend/app/prompts/**/*.md
-!backend/evals/fixtures/*.md
+!backend/evals/fixtures/**/*.md
 
 # Eval run outputs (baseline.json is committed)
 backend/evals/results/

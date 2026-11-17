@@ -73,6 +73,11 @@ class Settings(BaseSettings):
     # --- Memory relevance (L2 distance on normalized embeddings: 0 = identical, 2 = opposite) ---
     # Calibrated for gemini-embedding-001 query->document pairs: matches 0.60-0.77,
     # related 0.75-0.80, unrelated ~1.0. Recalibrate whenever the embedding model changes.
+    # Every Gemini HTTP call (embeddings, OCR, image analysis). The SDK default is
+    # NO timeout: a dropped connection used to hang an upload in "processing" forever.
+    GEMINI_HTTP_TIMEOUT_MS: int = 60_000
+    # RAG over uploaded files: "hybrid" (keyword + vector, fused) or "vector" (vector only).
+    RETRIEVAL_MODE: str = "hybrid"
     MEMORY_MAX_DISTANCE: float = 0.9
     RELATED_CONVERSATION_MAX_DISTANCE: float = 0.85
     FILE_PROCESSING_BACKEND: str = "local"

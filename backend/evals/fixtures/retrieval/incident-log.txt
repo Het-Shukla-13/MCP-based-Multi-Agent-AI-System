@@ -1,0 +1,23 @@
+2026-03-02 07:14  DC-04
+Forklift FL-22 tipped a half pallet of glassware during reversing. No injuries. Driver retrained; reversing alarm on FL-22 found faulty and replaced.
+Status: closed.
+
+2026-03-09 13:40  DC-07
+Sorter jam on the Kestrel induction belt. Root cause: shrink wrap caught in the tensioner. Tensioner kit replaced, 2 hours downtime.
+Status: closed.
+
+2026-04-18 22:05  DC-02
+Power cut for 41 minutes. Chilled storage rose to 7 °C; 3 pallets of dairy written off after QA review. Generator transfer switch failed to engage and has been serviced.
+Status: closed.
+
+2026-05-11 09:30  DC-10
+Seal number mismatch on inbound trailer TR-5582. Load quarantined, security cleared it after 3 hours; supplier had re-sealed after a customs check.
+Status: closed.
+
+2026-06-27 16:20  DC-05
+Employee slipped on condensation near the blast freezer door. Minor sprain. Anti-slip matting installed and a door heater fault was fixed.
+Status: closed.
+
+2026-08-03 11:55  DC-11
+Duplicate SSCC labels found on two outbound pallets for customer Velta. Labels reprinted; printer template had a fixed serial due to a configuration error.
+Status: closed.

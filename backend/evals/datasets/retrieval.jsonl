@@ -1,0 +1,32 @@
+{"id": "x01", "group": "exact", "query": "What is the part number of the replacement drive belt?", "expect": ["KS-4471-B"]}
+{"id": "x02", "group": "exact", "query": "What does WMS error E-7731 mean?", "expect": ["E-7731", "overflow lane"]}
+{"id": "x03", "group": "exact", "query": "What should I do about E-2208?", "expect": ["E-2208", "Quarantine both pallets"]}
+{"id": "x04", "group": "exact", "query": "What is exception GI-17?", "expect": ["GI-17", "quarantined"]}
+{"id": "x05", "group": "exact", "query": "What happened with trailer TR-5582?", "expect": ["TR-5582", "security cleared"]}
+{"id": "x06", "group": "exact", "query": "Which issue did FL-22 have?", "expect": ["FL-22", "reversing alarm"]}
+{"id": "x07", "group": "exact", "query": "What is reason code RT-09 used for?", "expect": ["RT-09", "Grade C"]}
+{"id": "x08", "group": "exact", "query": "Who is the site lead for DC-09?", "expect": ["Rui Tavares"]}
+{"id": "s01", "group": "confusable", "query": "Where do people gather during a fire alarm at the Porto warehouse?", "expect": ["bus stop on the service road"]}
+{"id": "s02", "group": "confusable", "query": "What temperature is the chilled storage in Milan?", "expect": ["Chilled storage at DC-04 is held at 5"]}
+{"id": "s03", "group": "confusable", "query": "How many loading docks does the Gothenburg site have?", "expect": ["DC-08 operates 12 loading docks"]}
+{"id": "s04", "group": "confusable", "query": "When does the early shift start in Valencia?", "expect": ["early shift at DC-06 starts at 05:30"]}
+{"id": "s05", "group": "confusable", "query": "How many pallet positions are there at DC-11?", "expect": ["31,500"]}
+{"id": "s06", "group": "confusable", "query": "What is the evacuation meeting place for Leipzig?", "expect": ["courtyard beside the training room"]}
+{"id": "s07", "group": "confusable", "query": "Who is the site lead in Antwerp?", "expect": ["Pieter Claes"]}
+{"id": "p01", "group": "paraphrase", "query": "How long can chilled goods wait on the dock before going back into the fridge?", "expect": ["25 minutes"]}
+{"id": "p02", "group": "paraphrase", "query": "How long must a lead-acid battery cool down after it is fully charged?", "expect": ["45 minutes"]}
+{"id": "p03", "group": "paraphrase", "query": "How many times is film wound around the bottom of a pallet?", "expect": ["five turns at the base"]}
+{"id": "p04", "group": "paraphrase", "query": "Within how many days can customers send products back?", "expect": ["30 days"]}
+{"id": "p05", "group": "paraphrase", "query": "What was thrown away after the power outage in Hamburg?", "expect": ["3 pallets of dairy"]}
+{"id": "p06", "group": "paraphrase", "query": "Why did the parcel sorter stop in March?", "expect": ["shrink wrap caught in the tensioner"]}
+{"id": "p07", "group": "paraphrase", "query": "What made an employee slip near the freezer?", "expect": ["condensation"]}
+{"id": "c01", "group": "context", "query": "When are scrapped returns picked up?", "expect": ["every Thursday"]}
+{"id": "c02", "group": "context", "query": "Can lithium-ion forklifts be used right after charging?", "expect": ["Lithium-ion units do not need a rest period"]}
+{"id": "t01", "group": "table", "query": "Which bin holds part HX-3127-C?", "expect": ["HX-3127-C | Seal kit, size 9 | 156.70 EUR | R15-06"]}
+{"id": "t02", "group": "table", "query": "What does HX-3127-B cost?", "expect": ["HX-3127-B | Pressure valve, size 9 | 317.91 EUR"]}
+{"id": "t03", "group": "table", "query": "What kind of part is HX-3141-B?", "expect": ["HX-3141-B | Filter cartridge, size 2"]}
+{"id": "t04", "group": "table", "query": "Where is HX-3158-C stored?", "expect": ["HX-3158-C | Pressure valve, size 8 | 136.62 EUR | R35-04"]}
+{"id": "l01", "group": "long", "query": "When do visitor badges expire?", "expect": ["Visitor badges expire at 18:00"]}
+{"id": "l02", "group": "long", "query": "How long must WMS passwords be?", "expect": ["at least 14 characters"]}
+{"id": "l03", "group": "long", "query": "How quickly must a lost scanner be reported?", "expect": ["within 2 hours"]}
+{"id": "l04", "group": "long", "query": "How long is CCTV footage retained?", "expect": ["kept for 31 days"]}

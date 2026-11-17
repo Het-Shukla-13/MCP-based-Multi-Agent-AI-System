@@ -34,7 +34,22 @@ def parse_judge(raw: str) -> dict:
     return {**scores, "reason": str(data.get("reason", ""))[:300], "passed": scores["correctness"] >= 4}
 
 
+def grade_retrieval(context: str, expect: list[str]) -> list[str]:
+    """Expected snippets missing from the retrieved context (case-insensitive)."""
+    haystack = " ".join(context.lower().split())
+    return [e for e in expect if " ".join(e.lower().split()) not in haystack]
+
+
 def summarize(results: list[dict]) -> dict:
     total = len(results)
     passed = sum(1 for r in results if r["passed"])
-    return {"cases": total, "passed": passed, "score": round(passed / total, 3) if total else 0.0}
+    summary = {"cases": total, "passed": passed, "score": round(passed / total, 3) if total else 0.0}
+    groups = sorted({r["group"] for r in results if r.get("group")})
+    if groups:
+        summary["by_group"] = {
+            g: f"{sum(r['passed'] for r in results if r.get('group') == g)}/{sum(r.get('group') == g for r in results)}"
+            for g in groups
+        }
+    if any("context_chars" in r for r in results):
+        summary["avg_context_chars"] = int(sum(r.get("context_chars", 0) for r in results) / total)
+    return summary
