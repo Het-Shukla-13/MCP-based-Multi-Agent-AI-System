@@ -122,9 +122,9 @@ export default function MessageInput({
         <label className="composer-select">
           <span>Agent</span>
           <select disabled={disabled} onChange={(e) => onPinAgent(e.target.value || null)} value={pinnedAgent || ""}>
-            <option value="">🧭 Auto (router picks)</option>
+            <option value="">Auto (router picks)</option>
             {agents.map((a) => (
-              <option key={a.name} value={a.name}>{agentIcon(a.name)} {agentLabel(agents, a.name)}</option>
+              <option key={a.name} value={a.name}>{agentLabel(agents, a.name)}</option>
             ))}
           </select>
         </label>

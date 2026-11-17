@@ -16,6 +16,9 @@ import {
 } from "../lib/api";
 import { useConversationSocket } from "../hooks/useConversationSocket";
 import { useConversationUploads } from "../hooks/useConversationUploads";
+import { Brain, Menu } from "lucide-react";
+import Toaster from "../components/Toaster";
+import { useToasts } from "../hooks/useToasts";
 import { checkFiles } from "../lib/uploads";
 
 export default function ChatPage({ user, onLogout }) {
@@ -34,7 +37,8 @@ export default function ChatPage({ user, onLogout }) {
   const [messageLoadingConversationId, setMessageLoadingConversationId] =
     useState("");
   const [isCreatingConversation, setIsCreatingConversation] = useState(false);
-  const [statusMessage, setStatusMessage] = useState("Loading conversations...");
+  // Transient feedback is a toast (it used to be a banner that pushed the chat down).
+  const { toasts, notify: setStatusMessage, dismiss: dismissToast } = useToasts();
   const [draftFilesByConversation, setDraftFilesByConversation] = useState({});
   // Agents fetched from /ws/agents on mount
   const [agents, setAgents] = useState([]);
@@ -135,17 +139,13 @@ export default function ChatPage({ user, onLogout }) {
 
         setConversations(sorted);
         setSelectedConversationId(sorted[0]?.id || "");
-        setStatusMessage(
-          sorted.length > 0
-            ? "Conversations loaded."
-            : "No conversations yet. Start a new chat."
-        );
+        // An empty list is a STATE (the sidebar shows a hint), not an event: no toast.
       } catch (error) {
         if (!isMounted) {
           return;
         }
 
-        setStatusMessage(errorMessage(error, "Could not load conversations from the backend."));
+        setStatusMessage(errorMessage(error, "Could not load conversations from the backend."), "error");
       } finally {
         if (isMounted) {
           setIsConversationListLoading(false);
@@ -158,7 +158,7 @@ export default function ChatPage({ user, onLogout }) {
     return () => {
       isMounted = false;
     };
-  }, []);
+  }, [setStatusMessage]);
 
   useEffect(() => {
     if (!selectedConversationId) {
@@ -190,7 +190,8 @@ export default function ChatPage({ user, onLogout }) {
 
         setStatusMessage(
           error.response?.data?.detail ||
-            "Could not load messages for the selected conversation."
+            "Could not load messages for the selected conversation.",
+          "error"
         );
       } finally {
         if (isMounted) {
@@ -204,7 +205,7 @@ export default function ChatPage({ user, onLogout }) {
     return () => {
       isMounted = false;
     };
-  }, [selectedConversationId]);
+  }, [selectedConversationId, setStatusMessage]);
 
   const handleCreateConversation = async () => {
     setIsCreatingConversation(true);
@@ -214,11 +215,12 @@ export default function ChatPage({ user, onLogout }) {
 
       setConversations((current) => [conversation, ...current]);
       setSelectedConversationId(conversation.id);
-      setStatusMessage("New conversation created.");
+      setStatusMessage("New conversation created.", "success");
     } catch (error) {
       setStatusMessage(
         error.response?.data?.detail ||
-          "Could not create a new conversation."
+          "Could not create a new conversation.",
+        "error"
       );
     } finally {
       setIsCreatingConversation(false);
@@ -230,7 +232,7 @@ export default function ChatPage({ user, onLogout }) {
       const updated = await renameConversation(conversationId, title);
       setConversations((current) => current.map((c) => (c.id === conversationId ? { ...c, title: updated.title } : c)));
     } catch (error) {
-      setStatusMessage(errorMessage(error, "Could not rename the conversation."));
+      setStatusMessage(errorMessage(error, "Could not rename the conversation."), "error");
     }
   };
 
@@ -245,9 +247,9 @@ export default function ChatPage({ user, onLogout }) {
         return next;
       });
       if (conversationId === selectedConversationId) setSelectedConversationId(remaining[0]?.id || "");
-      setStatusMessage("Conversation deleted.");
+      setStatusMessage("Conversation deleted.", "success");
     } catch (error) {
-      setStatusMessage(errorMessage(error, "Could not delete the conversation."));
+      setStatusMessage(errorMessage(error, "Could not delete the conversation."), "error");
     }
   };
 
@@ -264,7 +266,7 @@ export default function ChatPage({ user, onLogout }) {
       link.click();
       URL.revokeObjectURL(url); // free the in-memory file
     } catch (error) {
-      setStatusMessage(errorMessage(error, "Could not export the conversation."));
+      setStatusMessage(errorMessage(error, "Could not export the conversation."), "error");
     }
   };
 
@@ -275,10 +277,11 @@ export default function ChatPage({ user, onLogout }) {
       const refreshed = await fetchConversations();
       setConversations(refreshed);
       setSelectedConversationId(result.conversation_id);
-      setStatusMessage(`Imported ${result.message_count} messages. Memories are being rebuilt in the background.`);
+      setStatusMessage(`Imported ${result.message_count} messages. Memories are being rebuilt in the background.`, "success");
     } catch (error) {
       setStatusMessage(
-        error instanceof SyntaxError ? "That file is not valid JSON." : errorMessage(error, "Could not import the conversation.")
+        error instanceof SyntaxError ? "That file is not valid JSON." : errorMessage(error, "Could not import the conversation."),
+        "error"
       );
     }
   };
@@ -386,7 +389,7 @@ export default function ChatPage({ user, onLogout }) {
 
   const handleAttachFiles = async (files) => {
     if (!selectedConversationId) {
-      setStatusMessage("Select a conversation before uploading files.");
+      setStatusMessage("Select a conversation before uploading files.", "warning");
       return;
     }
 
@@ -395,7 +398,7 @@ export default function ChatPage({ user, onLogout }) {
       ? `Skipped: ${rejected.map((r) => `${r.name} (${r.reason})`).join(", ")}. `
       : "";
     if (accepted.length === 0) {
-      setStatusMessage(rejectedNote);
+      setStatusMessage(rejectedNote, "warning");
       return;
     }
 
@@ -410,9 +413,9 @@ export default function ChatPage({ user, onLogout }) {
           (file) => !currentFiles.some((currentFile) => currentFile.id === file.id)
         ),
       ]);
-      setStatusMessage(`${rejectedNote}Files uploaded. Waiting for processing to finish...`);
+      setStatusMessage(`${rejectedNote}Files uploaded. Waiting for processing to finish...`, rejectedNote ? "warning" : "info");
     } catch (error) {
-      setStatusMessage(rejectedNote + errorMessage(error, "Could not upload files for this conversation."));
+      setStatusMessage(rejectedNote + errorMessage(error, "Could not upload files for this conversation."), "error");
     }
   };
 
@@ -436,7 +439,7 @@ export default function ChatPage({ user, onLogout }) {
 
   const handleSendMessage = async ({ content, fileIds, format }) => {
     if (!selectedConversationId) {
-      setStatusMessage("Select a conversation before sending a message.");
+      setStatusMessage("Select a conversation before sending a message.", "warning");
       return false;
     }
     return sendMessage(content, fileIds, { format });
@@ -484,14 +487,14 @@ export default function ChatPage({ user, onLogout }) {
     }
 
     if (attachedFiles.every((file) => file.status === "processed")) {
-      setStatusMessage("Files processed. You can send your message now.");
+      setStatusMessage("Files processed. You can send your message now.", "success");
       return;
     }
 
     if (attachedFiles.some((file) => file.status === "failed")) {
-      setStatusMessage("One or more files failed processing. Remove them to continue.");
+      setStatusMessage("One or more files failed processing. Remove them to continue.", "error");
     }
-  }, [attachedFiles]);
+  }, [attachedFiles, setStatusMessage]);
 
   return (
     <div className="app-shell">
@@ -527,19 +530,20 @@ export default function ChatPage({ user, onLogout }) {
             onClick={() => setIsSidebarOpen(true)}
             type="button"
           >
-            ☰
+            <Menu aria-hidden="true" size={20} />
           </button>
           <div className="workspace-header__title">
             <p className="workspace-header__label">Current Chat</p>
             <h2>{selectedConversation?.title || "No conversation selected"}</h2>
           </div>
           <div className="workspace-header__actions">
-            <button className="secondary-button" onClick={() => setIsMemoryOpen(true)} type="button">🧠 Memory</button>
+            <button className="secondary-button button-with-icon" onClick={() => setIsMemoryOpen(true)} type="button">
+              <Brain aria-hidden="true" size={16} />
+              Memory
+            </button>
             <span className={`status-pill status-pill--${connectionState}`}>{connectionState}</span>
           </div>
         </header>
-
-        {statusMessage ? <div className="status-banner" role="status">{statusMessage}</div> : null}
 
         <ChatWindow
           activeAgent={activeAgent}
@@ -561,6 +565,7 @@ export default function ChatPage({ user, onLogout }) {
         />
       </main>
       {isMemoryOpen ? <MemoryPanel onClose={() => setIsMemoryOpen(false)} /> : null}
+      <Toaster onDismiss={dismissToast} toasts={toasts} />
     </div>
   );
 }

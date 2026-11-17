@@ -19,7 +19,7 @@ test("import, rename, export and delete a conversation", async ({ page }, testIn
   fs.writeFileSync(file, JSON.stringify(EXPORT));
 
   await page.locator(".sidebar input[type=file]").setInputFiles(file);
-  await expect(page.locator(".status-banner")).toContainText("Imported 2 messages");
+  await expect(page.locator(".toast", { hasText: "Imported 2 messages" })).toBeVisible();
   await expect(page.locator(".message--assistant .message-body")).toContainText("Lake Pichola");
 
   const item = page.locator(".conversation-item").first();
@@ -43,5 +43,5 @@ test("importing a file that is not JSON shows a clear error", async ({ page }, t
   const file = testInfo.outputPath("broken.json");
   fs.writeFileSync(file, "{not json");
   await page.locator(".sidebar input[type=file]").setInputFiles(file);
-  await expect(page.locator(".status-banner")).toHaveText("That file is not valid JSON.");
+  await expect(page.locator(".toast", { hasText: "That file is not valid JSON." })).toBeVisible();
 });

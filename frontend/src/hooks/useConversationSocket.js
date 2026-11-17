@@ -118,14 +118,14 @@ export function useConversationSocket({
         const aiMessage = { ...data.ai_message, error: data.error === true };
         updateMessages(conversationId, (messages) => replaceWithSaved(messages, data.user_message, aiMessage));
         finishTurn();
-        setStatusMessage(data.error ? "The assistant could not complete that request." : "");
+        if (data.error) setStatusMessage("The assistant could not complete that request.", "error");
         return;
       }
 
       if (payload.type === "error") {
         updateMessages(conversationId, (messages) => messages.filter((m) => !m.pending && m.id !== DRAFT_ID));
         finishTurn();
-        setStatusMessage(payload.detail || "Failed to process the message.");
+        setStatusMessage(payload.detail || "Failed to process the message.", "error");
       }
     };
 
@@ -162,7 +162,7 @@ export function useConversationSocket({
           finishTurn();
           updateMessages(conversationId, (messages) => messages.filter((m) => m.id !== DRAFT_ID));
           onResyncRef.current?.(conversationId);
-          setStatusMessage("Reconnected.");
+          setStatusMessage("Reconnected.", "success");
         }
         hasConnectedBefore = true;
       };
@@ -202,7 +202,7 @@ export function useConversationSocket({
   const sendMessage = (content, attachedFileIds = [], options = {}) => {
     const socket = socketRef.current;
     if (!selectedConversationId || !socket || socket.readyState !== WebSocket.OPEN) {
-      setStatusMessage("Not connected right now. Reconnecting; try again in a moment.");
+      setStatusMessage("Not connected right now. Reconnecting; try again in a moment.", "warning");
       return false;
     }
     updateMessages(selectedConversationId, (messages) => [...messages, createTempMessage(content, attachedFileIds)]);
