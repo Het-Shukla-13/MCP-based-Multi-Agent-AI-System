@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { X } from "lucide-react";
 import {
   createMemory,
   errorMessage,
@@ -189,9 +190,10 @@ function ProfileTab({ onError }) {
                     onClick={async () => {
                       try { setProfile(await removeProfileItem(item)); } catch (err) { onError(errorMessage(err, "Could not remove the item.")); }
                     }}
+                    className="icon-button"
                     type="button"
                   >
-                    ✕
+                    <X aria-hidden="true" size={14} />
                   </button>
                 </li>
               ))}
@@ -219,7 +221,9 @@ export default function MemoryPanel({ onClose }) {
       <aside aria-label="Memory" className="drawer" role="dialog">
         <header className="drawer__header">
           <h3>What the assistant remembers</h3>
-          <button aria-label="Close" onClick={onClose} type="button">✕</button>
+          <button aria-label="Close" className="icon-button" onClick={onClose} type="button">
+            <X aria-hidden="true" size={18} />
+          </button>
         </header>
         <div className="drawer__tabs" role="tablist">
           <button aria-selected={tab === "memories"} onClick={() => setTab("memories")} role="tab" type="button">Memories</button>

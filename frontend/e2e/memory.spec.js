@@ -10,7 +10,7 @@ test("add, search, edit, deactivate and delete a memory; profile follows", async
   test.setTimeout(240_000);
   page.on("dialog", (dialog) => dialog.accept());
   await register(page);
-  await page.getByRole("button", { name: "🧠 Memory" }).click();
+  await page.getByRole("button", { name: "Memory", exact: true }).click();
   const panel = page.getByRole("dialog", { name: "Memory" });
   await expect(panel).toBeVisible();
 

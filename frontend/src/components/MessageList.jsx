@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { CornerDownRight } from "lucide-react";
 import { generatedFileUrl } from "../lib/api";
 import { agentIcon, agentLabel, describeStatus } from "../lib/agents";
 import MarkdownMessage from "./MarkdownMessage";
@@ -80,10 +81,11 @@ export default function MessageList({ agentStatus, agents, conversation, isLoadi
         const switched = switchedAt.has(message.id);
 
         return (
-          <div key={message.id}>
+          <div className={`message-row message-row--${message.role}`} key={message.id}>
             {switched ? (
               <div className="agent-switch-banner" aria-live="polite">
-                ↪ Switched to <strong>{agentIcon(agent)} {agentLabel(agents, agent)}</strong>
+                <CornerDownRight aria-hidden="true" className="icon" size={14} />
+                Switched to <strong className="agent-name">{agentIcon(agent, 14)} {agentLabel(agents, agent)}</strong>
               </div>
             ) : null}
             <article
@@ -96,7 +98,7 @@ export default function MessageList({ agentStatus, agents, conversation, isLoadi
             >
               <div className="message-meta">
                 <span className="message-role">
-                  {isAssistant ? `${agentIcon(agent)} ${agentLabel(agents, agent)}` : "You"}
+                  {isAssistant ? <>{agentIcon(agent, 15)} {agentLabel(agents, agent)}</> : "You"}
                 </span>
                 <span className="message-time">{message.pending ? "Sending..." : formatTime(message.created_at)}</span>
               </div>

@@ -24,6 +24,6 @@ test("phone layout: drawer navigation, composer always reachable, no overflow", 
   await page.locator(".sidebar-backdrop").click({ position: { x: 370, y: 400 } });
   await expect(page.locator(".sidebar--open")).toHaveCount(0);
 
-  await page.getByRole("button", { name: "🧠 Memory" }).click();
+  await page.getByRole("button", { name: "Memory", exact: true }).click();
   expect(await inViewport(page.getByRole("dialog", { name: "Memory" }))).toBe(true);
 });

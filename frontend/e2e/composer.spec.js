@@ -40,6 +40,6 @@ test("drag-and-drop uploads valid files and names the rejected ones", async ({ p
 
   await expect(page.locator(".composer-file-chip")).toHaveCount(1);
   await expect(page.locator(".composer-file-chip").first()).toContainText("sales.csv");
-  await expect(page.locator(".status-banner")).toContainText("setup.exe (unsupported type)");
-  await expect(page.locator(".status-banner")).toContainText("huge.txt (larger than 7 MB)");
+  await expect(page.locator(".toast", { hasText: "setup.exe (unsupported type)" })).toBeVisible();
+  await expect(page.locator(".toast", { hasText: "huge.txt (larger than 7 MB)" })).toBeVisible();
 });

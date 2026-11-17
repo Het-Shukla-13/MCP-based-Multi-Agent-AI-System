@@ -1,4 +1,5 @@
 import { useRef, useState } from "react";
+import { Download, Pencil, Trash2 } from "lucide-react";
 import ThemeToggle from "./ThemeToggle";
 
 function formatConversationDate(value) {
@@ -39,15 +40,20 @@ function ConversationItem({ conversation, isActive, onSelect, onRename, onDelete
         </button>
       )}
       <div className="conversation-item__actions">
-        <button aria-label="Rename" onClick={() => setEditing(true)} title="Rename" type="button">✎</button>
-        <button aria-label="Export" onClick={() => onExport(conversation)} title="Export as JSON" type="button">⤓</button>
+        <button aria-label="Rename" className="icon-button" onClick={() => setEditing(true)} title="Rename" type="button">
+          <Pencil aria-hidden="true" size={15} />
+        </button>
+        <button aria-label="Export" className="icon-button" onClick={() => onExport(conversation)} title="Export as JSON" type="button">
+          <Download aria-hidden="true" size={15} />
+        </button>
         <button
           aria-label="Delete"
+          className="icon-button icon-button--danger"
           onClick={() => window.confirm(`Delete "${conversation.title}" and its messages and files?`) && onDelete(conversation.id)}
           title="Delete"
           type="button"
         >
-          🗑
+          <Trash2 aria-hidden="true" size={15} />
         </button>
       </div>
     </div>
