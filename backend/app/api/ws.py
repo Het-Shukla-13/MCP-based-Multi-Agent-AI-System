@@ -1,19 +1,16 @@
 import json
 import logging
-from time import perf_counter
-from app.agent_layer.core import agent_registry
-from app.services.message.message_service import send_message_from_payload
-from app.schemas.message import MessageRead
-from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
-from sqlmodel import select
 from uuid import UUID
-from app.db.database import get_db
-from app.models import Conversation
+
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from sqlmodel import select
+
+from app.agent_layer.core import agent_registry
 from app.core.security import decode_access_token
 from app.core.websocket import manager
-from app.services.time.timing import elapsed_minutes
-from sqlalchemy.ext.asyncio.session import AsyncSession
-from fastapi.encoders import jsonable_encoder
+from app.db.database import AsyncSessionLocal
+from app.models import Conversation
+from app.services.turns import QueueFullError, turn_runner
 
 logger = logging.getLogger(__name__)
 
@@ -36,100 +33,69 @@ async def list_agents():
 
 
 @router.websocket("/{conversation_id}")
-async def websocket_endpoint(websocket: WebSocket, conversation_id: UUID, db: AsyncSession = Depends(get_db)):
+async def websocket_endpoint(websocket: WebSocket, conversation_id: UUID):
+    """
+    Command channel for one conversation. Turns are run by the TurnRunner, not
+    here, so this loop keeps reading while a reply is being written.
+
+    Client -> server:
+      {"content": "...", "file_ids": [...], "selected_agent": ..., "format": ..., "client_id": ...}
+                                         (no "type", or "type": "send") -> queue a turn
+      {"type": "stop"}                   -> cancel the running turn (partial answer is kept)
+      {"type": "dequeue", "turn_id": ..} -> remove a queued turn
+    Server -> client:
+      turn_state (on connect: running turn + draft + queue), turn_queued, turn_started,
+      agent_status, chat_delta, chat (saved messages), turn_finished, error
+    """
     # Browsers can't set headers on a WebSocket, so the access token comes as
     # ?token=. The user id is DERIVED from it; a client-supplied user_id is ignored.
-    authenticated_user_id = decode_access_token(websocket.query_params.get("token") or "")
-    if authenticated_user_id is None:
+    user_id = decode_access_token(websocket.query_params.get("token") or "")
+    if user_id is None:
         await websocket.close(code=1008)  # 1008 = policy violation
         return
 
-    result = await db.execute(
-        select(Conversation).where(
-            Conversation.id == conversation_id,
-            Conversation.user_id == authenticated_user_id,
-        )
-    )
-    conversation = result.scalar_one_or_none()
-    if not conversation:
+    # Short-lived session: holding one for the socket's lifetime kept a DB
+    # transaction open while the user was idle.
+    async with AsyncSessionLocal() as db:
+        owned = (await db.execute(
+            select(Conversation.id).where(Conversation.id == conversation_id, Conversation.user_id == user_id)
+        )).scalar_one_or_none()
+    if not owned:
         await websocket.close(code=1008)
         return
 
     await manager.connect(conversation_id, websocket)
+    # Replay: a client (re)connecting mid-turn gets the draft so far and the queue.
+    await websocket.send_json({"type": "turn_state", "data": turn_runner.snapshot(conversation_id)})
 
     try:
         while True:
-            receive_started_at = perf_counter()
-            data = await websocket.receive_text()
-            logger.info(
-                "WebSocket timing | stage=receive_text | conversation_id=%s | duration_min=%.4f",
-                conversation_id,
-                elapsed_minutes(receive_started_at),
-            )
+            raw = await websocket.receive_text()
             try:
-                payload = json.loads(data)
-                process_started_at = perf_counter()
-
-                # Live progress: "routing" -> "working: code" before the reply arrives.
-                async def push_status(event: dict, _cid=conversation_id) -> None:
-                    if event.get("status") == "delta":
-                        # Streamed reply text; the final "chat" message still carries the
-                        # complete, saved reply (clients replace the draft with it).
-                        message = {"type": "chat_delta", "data": {
-                            "conversation_id": str(_cid), "agent": event.get("agent"), "text": event.get("text", "")}}
-                    else:
-                        message = {"type": "agent_status", "data": {"conversation_id": str(_cid), **event}}
-                    await manager.send_to_conversation(message, _cid)
-
-                result = await send_message_from_payload(
-                    db,
-                    conversation_id,
-                    payload,
-                    authenticated_user_id,
-                    on_status=push_status,
-                )
-                logger.info(
-                    "WebSocket timing | stage=process_message | conversation_id=%s | duration_min=%.4f",
-                    conversation_id,
-                    elapsed_minutes(process_started_at),
-                )
-
-                send_started_at = perf_counter()
-                await manager.send_to_conversation(
-                    jsonable_encoder({
-                        "type": "chat",
-                        "data": {
-                            "conversation_id": str(conversation_id),
-                            "user_message": MessageRead.model_validate(
-                                result["user_message"]
-                            ).model_dump(),
-                            "ai_message": MessageRead.model_validate(
-                                result["ai_message"]
-                            ).model_dump(),
-                            "active_agent": result.get("active_agent", "general"),
-                            "agent_switched": result.get("agent_switched", False),
-                            "error": result.get("error", False),
-                        }
-                    }),
-                    conversation_id
-                )
-                logger.info(
-                    "WebSocket timing | stage=send_to_conversation | conversation_id=%s | duration_min=%.4f",
-                    conversation_id,
-                    elapsed_minutes(send_started_at),
-                )
+                command = json.loads(raw)
+                if not isinstance(command, dict):
+                    raise ValueError("Expected a JSON object.")
+                kind = command.get("type") or "send"
+                if kind == "stop":
+                    stopped = await turn_runner.stop(conversation_id)
+                    if not stopped:
+                        await websocket.send_json({"type": "error", "detail": "Nothing is running."})
+                elif kind == "dequeue":
+                    await turn_runner.dequeue(conversation_id, UUID(str(command.get("turn_id"))))
+                elif kind == "send":
+                    payload = {k: command.get(k) for k in ("content", "file_ids", "selected_agent", "format")}
+                    payload["file_ids"] = [str(f) for f in (payload["file_ids"] or [])]
+                    client_id = command.get("client_id")
+                    await turn_runner.submit(conversation_id, user_id, payload,
+                                             client_id=str(client_id)[:64] if client_id else None)
+                else:
+                    raise ValueError(f"Unknown command type: {kind}")
+            except (QueueFullError, ValueError) as exc:
+                await websocket.send_json({"type": "error", "detail": str(exc)})
             except Exception:
-                logger.exception(
-                    "WebSocket message handling failed for conversation %s",
-                    conversation_id,
-                )
-                await websocket.send_json(
-                    {
-                        "type": "error",
-                        "detail": "Failed to process the message.",
-                    }
-                )
-
+                logger.exception("WebSocket command failed | conversation=%s", conversation_id)
+                await websocket.send_json({"type": "error", "detail": "Failed to process the message."})
     except WebSocketDisconnect:
+        pass  # running turns continue; their result is saved and replayed on reconnect
+    finally:
         manager.disconnect(conversation_id, websocket)
-
