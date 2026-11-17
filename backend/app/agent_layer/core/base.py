@@ -19,6 +19,7 @@ from app.agent_layer.core.confirmation import (
     preview_args,
     tool_response_for,
 )
+from app.agent_layer.core.tool_scheduler import ToolScheduler, is_write
 from app.agent_layer.schemas import AgentContext, AgentResponse
 from app.agent_layer.tools.mcp_registry import IDENTITY_ARGS, get_toolsets_for_agent
 from app.core.config import settings
@@ -222,36 +223,60 @@ class BaseAgent(ABC):
 
         # MCP tools for this agent (least-privilege view of shared servers).
         adk_agent.tools = list(get_toolsets_for_agent(self.name))
-        adk_agent.before_tool_callback = self._identity_injector(context)
+        (adk_agent.before_tool_callback,
+         adk_agent.after_tool_callback,
+         adk_agent.on_tool_error_callback) = self._tool_callbacks(context)
         adk_agent.before_model_callback = strip_routing_context
         return adk_agent
 
-    def _identity_injector(self, context: AgentContext):
+    def _tool_callbacks(self, context: AgentContext):
         """
-        Never trust identifiers chosen by the model: a prompt-injected document could
-        ask a tool to read another user's files. Overwrite them with the real request
-        identity before EVERY tool call.
+        before/after/on_error tool callbacks sharing one per-request ToolScheduler.
+
+        before: 1) identity  2) schedule (reads concurrent, writes exclusive and
+        after the step's reads)  3) confirmation for side-effect tools.
+        after / on_error: release the schedule slot (idempotent per call).
         """
         identity = {"user_id": context.user_id, "conversation_id": context.conversation_id}
+        scheduler = ToolScheduler()
+
+        def call_key(tool_context) -> str:
+            return getattr(tool_context, "function_call_id", None) or f"ctx-{id(tool_context)}"
 
         async def before_tool(tool, args: dict, tool_context):
+            # Never trust identifiers chosen by the model: a prompt-injected document
+            # could ask a tool to read another user's files.
             for key in IDENTITY_ARGS:
                 if key in args or key in identity:
                     args[key] = identity[key]
             logger.info("Tool call | agent=%s | tool=%s | args=%s", self.name, tool.name,
                         {k: v for k, v in args.items() if k not in IDENTITY_ARGS})
-            # Side-effect tools wait for the user (approve / reject / revise) when a
-            # human is connected; the returned dict, if any, replaces the tool result.
-            confirmer = current_confirmer.get()
-            if confirmer is not None and needs_confirmation(tool.name):
-                call_id = getattr(tool_context, "function_call_id", None) or ""
-                decision = await confirmer(self.name, tool.name, preview_args(args, IDENTITY_ARGS), call_id)
-                logger.info("Tool confirmation | agent=%s | tool=%s | decision=%s",
-                            self.name, tool.name, decision.action)
-                return tool_response_for(tool.name, decision)
+            key = call_key(tool_context)
+            await scheduler.acquire(key, write=is_write(tool.name))
+            try:
+                # Side-effect tools wait for the user (approve / reject / revise) when a
+                # human is connected; the returned dict, if any, replaces the tool result.
+                confirmer = current_confirmer.get()
+                if confirmer is not None and needs_confirmation(tool.name):
+                    decision = await confirmer(self.name, tool.name, preview_args(args, IDENTITY_ARGS),
+                                               getattr(tool_context, "function_call_id", None) or "")
+                    logger.info("Tool confirmation | agent=%s | tool=%s | decision=%s",
+                                self.name, tool.name, decision.action)
+                    return tool_response_for(tool.name, decision)
+            except BaseException:  # cancelled (Stop) while waiting: free the slot
+                await scheduler.release(key)
+                raise
             return None  # None = proceed with the (patched) call
 
-        return before_tool
+        async def after_tool(tool, args: dict, tool_context, tool_response):
+            await scheduler.release(call_key(tool_context))
+            return None  # keep the tool's response unchanged
+
+        async def on_tool_error(tool, args: dict, tool_context, error):
+            await scheduler.release(call_key(tool_context))
+            return None  # ADK re-raises; the agent's own error handling applies
+
+        return before_tool, after_tool, on_tool_error
 
 
     async def _run_with_model(

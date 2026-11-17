@@ -5,6 +5,7 @@ Replaces the old "pre-flight" file-generation path, which ran a keyword check an
 often an extra LLM call on EVERY chat message and bypassed the agents entirely.
 """
 
+import asyncio
 import csv
 import io
 import json
@@ -60,7 +61,7 @@ async def create_file(title: str, file_format: str, content: str, user_id: str =
         if len(rows) < 2 or len(widths) != 1:
             return "Invalid CSV: needs a header plus rows, all with the same number of columns."
 
-    data = render_markdown_pdf(title, content) if fmt == "pdf" else content.encode("utf-8")
+    data = await asyncio.to_thread(render_markdown_pdf, title, content) if fmt == "pdf" else content.encode("utf-8")
     saved = await save_generated_file(
         user_id, conversation_id, f"{filename_timestamp()}_{file_stem(title)}.{fmt}", data, FORMATS[fmt]
     )
@@ -88,7 +89,7 @@ async def create_from_template(template: str, title: str, fields: dict[str, str]
         markdown_text = render_template(template, title, fields)
     except ValueError as exc:
         return f"{exc}. Fix the fields and call create_from_template again."
-    data = render_markdown_pdf("", markdown_text) if fmt == "pdf" else markdown_text.encode("utf-8")
+    data = await asyncio.to_thread(render_markdown_pdf, "", markdown_text) if fmt == "pdf" else markdown_text.encode("utf-8")
     saved = await save_generated_file(
         user_id, conversation_id, f"{filename_timestamp()}_{file_stem(title)}.{fmt}", data, FORMATS[fmt]
     )

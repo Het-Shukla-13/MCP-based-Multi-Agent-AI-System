@@ -1,3 +1,4 @@
+import time
 import asyncio
 from types import SimpleNamespace as NS
 from uuid import uuid4
@@ -83,10 +84,14 @@ def test_turn_context_reaches_llm_calls_in_thread_pool(monkeypatch):
 def test_finish_queues_one_turn_row_with_derived_totals():
     _drain()
     turn = TurnCollector(user_id=uuid4(), conversation_id=uuid4())
-    turn.tools = [{"tool": "a", "ms": 40, "ok": True}, {"tool": "b", "ms": None, "ok": False}]
+    turn.tool_started("1", "a", {})
+    time.sleep(0.04)
+    turn.tool_finished("1", "a", ok=True)
+    turn.tool_finished("2", "b", ok=False)  # response without a matching call: counted, no time
     turn.finish(message_id=None, agent_name="code", error=False)
     (kind, row), = _drain()
-    assert kind == "turn" and row["tool_calls"] == 2 and row["tool_ms"] == 40 and row["agent_name"] == "code"
+    assert kind == "turn" and row["tool_calls"] == 2 and row["agent_name"] == "code"
+    assert 40 <= row["tool_ms"] < 200
 
 
 def test_tool_success_uses_mcp_iserror_flag_not_text():

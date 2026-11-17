@@ -36,6 +36,7 @@ class TurnCollector:
     confirm_ms: int = 0
     _confirm_ms_at_first_token: int = 0
     _tool_wait_ms: dict[str, int] = field(default_factory=dict)
+    _tool_spans: list[tuple[float, float]] = field(default_factory=list)  # (start, end) per call
     tools: list[dict[str, Any]] = field(default_factory=list)
     _open_tools: dict[str, tuple[float, dict]] = field(default_factory=dict)
 
@@ -55,9 +56,12 @@ class TurnCollector:
 
     def tool_finished(self, call_id: str, name: str, ok: bool) -> None:
         started, info = self._open_tools.pop(call_id, (None, {"tool": name, "args": {}}))
-        ms = int((perf_counter() - started) * 1000) if started else None
+        now = perf_counter()
+        ms = int((now - started) * 1000) if started else None
         if ms is not None:
-            ms = max(0, ms - self._tool_wait_ms.pop(call_id, 0))
+            wait_ms = self._tool_wait_ms.pop(call_id, 0)
+            ms = max(0, ms - wait_ms)
+            self._tool_spans.append((started + wait_ms / 1000, now))
         self.tools.append({**info, "ms": ms, "ok": ok})
 
     def record_llm(self, *, purpose: str, model: str, input_tokens: int, output_tokens: int,
@@ -71,7 +75,7 @@ class TurnCollector:
     # ---- finish ----
     def finish(self, *, message_id: UUID | None, agent_name: str | None, error: bool) -> None:
         now = perf_counter()
-        tool_ms = sum(t["ms"] or 0 for t in self.tools)
+        tool_ms = tool_wall_ms(self._tool_spans)
         metrics_writer.put("turn", {
             "turn_id": self.turn_id,
             "user_id": self.user_id,
@@ -93,6 +97,23 @@ class TurnCollector:
             "fallback_used": self.fallback_used,
             "error": error,
         })
+
+
+def tool_wall_ms(spans: list[tuple[float, float]]) -> int:
+    """
+    Time during which at least one tool was running (union of intervals).
+    Summing per-call times over-counts parallel steps: three 0.8 s fetches that
+    ran together cost the user 0.8 s, not 2.4 s.
+    """
+    total, end = 0.0, None
+    for start, stop in sorted(spans):
+        if end is None or start > end:
+            total += stop - start
+            end = stop
+        elif stop > end:
+            total += stop - end
+            end = stop
+    return int(total * 1000)
 
 
 current_turn: ContextVar[TurnCollector | None] = ContextVar("current_turn", default=None)
