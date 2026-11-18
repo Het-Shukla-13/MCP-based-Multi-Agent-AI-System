@@ -99,3 +99,24 @@ def test_tool_success_uses_mcp_iserror_flag_not_text():
     assert _tool_succeeded({"content": [{"type": "text", "text": "Rows: 10"}], "isError": False}) is True
     assert _tool_succeeded({"content": [], "isError": True}) is False
     assert _tool_succeeded({"error": "boom"}) is False
+
+
+def test_daily_series_is_zero_filled_oldest_first_and_bounded():
+    from datetime import date, datetime
+    from types import SimpleNamespace
+
+    from app.api.metrics import daily_series
+
+    today = date(2026, 11, 18)
+    turns = [
+        SimpleNamespace(created_at=datetime(2026, 11, 18, 9), error=False),
+        SimpleNamespace(created_at=datetime(2026, 11, 18, 10), error=True),
+        SimpleNamespace(created_at=datetime(2026, 11, 16, 23, 59), error=False),
+        SimpleNamespace(created_at=datetime(2026, 11, 1), error=False),  # outside the window
+    ]
+    tokens = [(date(2026, 11, 18), 1500), (date(2026, 11, 16), None)]
+    series = daily_series(turns, tokens, 3, today)
+    assert [d["date"] for d in series] == ["2026-11-16", "2026-11-17", "2026-11-18"]
+    assert series[1] == {"date": "2026-11-17", "turns": 0, "errors": 0, "tokens": 0}  # empty day kept
+    assert series[2] == {"date": "2026-11-18", "turns": 2, "errors": 1, "tokens": 1500}
+    assert series[0]["turns"] == 1 and series[0]["tokens"] == 0
