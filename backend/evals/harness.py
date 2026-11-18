@@ -28,7 +28,7 @@ from app.services.file_processing.file_ingestion import ingest_file
 from app.services.llm.llm_service import _call_model
 from app.services.metrics.collector import TurnCollector, current_turn
 from app.services.rag.retriever import retrieve_pipeline
-from evals.graders import grade_retrieval, grade_routing, grade_tools, parse_judge
+from evals.graders import grade_retrieval, grade_routing, grade_tools, parse_judge, retry_after_seconds
 
 EVAL_EMAIL = "evals@example.com"
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -135,20 +135,55 @@ async def run_tools(cases: list[dict], user_id: str, conversation_id: str) -> li
     return results
 
 
+JUDGE_MAX_ATTEMPTS = 4
+JUDGE_MAX_WAIT_SECONDS = 60.0
+
+
+async def _judge(case: dict, answer: str) -> tuple[str, str]:
+    """
+    -> (raw verdict, judge model). Short rate limits (per minute) are waited out;
+    a long one (e.g. tokens per DAY) moves on to the fallback judge model.
+    """
+    messages = [
+        {"role": "system", "content": JUDGE_PROMPT},
+        {"role": "user", "content": f"QUESTION:\n{case['message']}\n\nREFERENCE:\n{case['reference']}\n\nANSWER:\n{answer}"},
+    ]
+    judges = [m for m in (settings.EVAL_JUDGE_MODEL, settings.EVAL_JUDGE_FALLBACK_MODEL) if m]
+    last_error: Exception | None = None
+    for model in judges:
+        for attempt in range(JUDGE_MAX_ATTEMPTS):
+            try:
+                raw = await asyncio.to_thread(_call_model, model, messages, {"type": "json_object"})
+                return raw, model
+            except Exception as exc:
+                last_error = exc
+                delay = retry_after_seconds(exc)
+                if delay is None or delay > JUDGE_MAX_WAIT_SECONDS or attempt == JUDGE_MAX_ATTEMPTS - 1:
+                    if delay is not None:
+                        print(f"  (judge {model} unavailable for ~{delay:.0f}s; trying the next judge)", flush=True)
+                    break
+                print(f"  (judge {model} rate-limited; waiting {delay:.1f}s)", flush=True)
+                await asyncio.sleep(delay + 0.5)
+    raise last_error or RuntimeError("no judge model configured")
+
+
 async def run_answers(cases: list[dict], user_id: str, conversation_id: str) -> list[dict]:
     results = []
     for case in cases:
         try:
             answer = (await agent_registry.get(case["agent"]).run(
                 _context(user_id, conversation_id, case["message"], case["agent"]))).content
-            raw = await asyncio.to_thread(_call_model, settings.EVAL_JUDGE_MODEL, [
-                {"role": "system", "content": JUDGE_PROMPT},
-                {"role": "user", "content": f"QUESTION:\n{case['message']}\n\nREFERENCE:\n{case['reference']}\n\nANSWER:\n{answer}"},
-            ], {"type": "json_object"})
-            verdict = parse_judge(raw)
-            results.append({"id": case["id"], "agent": case["agent"], **verdict, "answer": answer[:400]})
-        except Exception as exc:
+        except Exception as exc:  # the PRODUCT failed to answer: a real failure
             results.append({"id": case["id"], "agent": case["agent"], "passed": False, "error": str(exc)[:200]})
+            continue
+        try:
+            raw, judge_model = await _judge(case, answer)
+            verdict = parse_judge(raw)
+            results.append({"id": case["id"], "agent": case["agent"], **verdict, "judge": judge_model,
+                            "answer": answer[:400]})
+        except Exception as exc:  # the JUDGE (eval infrastructure) failed: inconclusive, not a failure
+            results.append({"id": case["id"], "agent": case["agent"], "passed": False, "inconclusive": True,
+                            "error": f"judge unavailable: {str(exc)[:160]}", "answer": answer[:400]})
     return results
 
 
