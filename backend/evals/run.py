@@ -63,6 +63,11 @@ async def main(args) -> int:
         return 0
     baseline = json.loads(BASELINE.read_text())
     regressions = {n: (baseline[n], s) for n, s in scores.items() if n in baseline and s < baseline[n] - args.tolerance}
+    untrustworthy = [n for n, s in report["suites"].items() if s["summary"].get("trustworthy") is False]
+    if untrustworthy:
+        # Too many cases couldn't be judged (provider outage): neither pass nor fail.
+        print(f"INCONCLUSIVE: too many unjudged cases in {untrustworthy}; re-run later")
+        return 2
     for n, s in scores.items():
         print(f"  {n:8} {s:.3f}  (baseline {baseline.get(n, '-')})")
     if regressions:
