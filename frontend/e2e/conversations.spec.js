@@ -45,3 +45,36 @@ test("importing a file that is not JSON shows a clear error", async ({ page }, t
   await page.locator(".sidebar input[type=file]").setInputFiles(file);
   await expect(page.locator(".toast", { hasText: "That file is not valid JSON." })).toBeVisible();
 });
+
+test("creating a chat while the list is still loading never duplicates it", async ({ page }) => {
+  // The race: the server creates the chat, the list GET is answered (already
+  // containing it) and applied FIRST, then the POST response is applied and the
+  // client prepends the same chat again -> two rows with one id.
+  let postReachedServer;
+  const serverHasChat = new Promise((resolve) => (postReachedServer = resolve));
+  let releasePost;
+  const postGate = new Promise((resolve) => (releasePost = resolve));
+  let heldList = false;
+  await page.route(/\/conversations\/$/, async (route) => {
+    const method = route.request().method();
+    if (method === "POST") {
+      const response = await route.fetch(); // the chat now exists on the server
+      postReachedServer();
+      await postGate; // ...but the browser only sees the response later
+      return route.fulfill({ response });
+    }
+    if (method === "GET" && !heldList) {
+      // Hold every list load (dev StrictMode runs the effect twice; the first
+      // response is deliberately ignored) until the chat exists on the server.
+      await serverHasChat;
+    }
+    return route.continue();
+  });
+  await register(page);
+  await page.getByRole("button", { name: "New Chat", exact: true }).click();
+  await expect(page.locator(".conversation-item")).toHaveCount(1); // list (with the new chat) applied
+  heldList = true;
+  releasePost(); // now the creation response lands
+  await page.waitForTimeout(500);
+  await expect(page.locator(".conversation-item")).toHaveCount(1);
+});
