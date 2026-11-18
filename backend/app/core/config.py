@@ -64,6 +64,10 @@ class Settings(BaseSettings):
     LLM_TEMPERATURE: float = 0.1
     LLM_MAX_WORKERS: int = 4
     MAINTENANCE_LLM_MAX_WORKERS: int = 1
+    # Conversation-driven background LLM jobs (memory maintenance, per-message profile
+    # extraction). Set false for e2e/load runs: the tests don't need them and they
+    # spend the free tier's daily token budget that real users and evals rely on.
+    BACKGROUND_LLM_JOBS_ENABLED: bool = True
     # Background memory maintenance holds a DB session across slow LLM calls. Cap how
     # many run at once so they can never take the whole pool from user requests.
     MAINTENANCE_MAX_CONCURRENT_RUNS: int = 2

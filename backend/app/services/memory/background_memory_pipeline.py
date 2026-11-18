@@ -209,6 +209,9 @@ def schedule_memory_maintenance_pipeline(
     user_id,
     conversation_id,
 ) -> None:
+    if not settings.BACKGROUND_LLM_JOBS_ENABLED:
+        logger.debug("Background maintenance disabled | conversation_id={}", conversation_id)
+        return
     user_key = str(user_id)
     pending_conversations = _USER_PENDING_CONVERSATIONS[user_key]
     if conversation_id not in pending_conversations:

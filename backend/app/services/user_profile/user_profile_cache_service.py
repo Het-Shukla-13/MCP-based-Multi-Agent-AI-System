@@ -3,6 +3,8 @@ import re
 
 from loguru import logger
 
+from app.core.config import settings
+
 from app.crud.memory import get_memories_by_user
 from app.crud.user_profile_snapshot import (
     get_user_profile_snapshot,
@@ -336,6 +338,8 @@ def schedule_profile_snapshot_update(user_message: Message) -> None:
     session. It used to block every reply even though the reply doesn't need it:
     the user's message is already in the agent's context.
     """
+    if not settings.BACKGROUND_LLM_JOBS_ENABLED:
+        return
 
     async def _run():
         async with AsyncSessionLocal() as db:
