@@ -5,7 +5,7 @@ One note per branch, in the order the work was done. Each note covers: the conce
 | # | Branch | Topic |
 |---|---|---|
 | 01 | `fix/llm-model-config` | Model lifecycle, provider routing, reasoning models, fallbacks, tokenizers |
-| 02 | `chore/python-312` | Python 3.12 venv, removed unused faiss-cpu |
+| 02 | `chore/python-312` | Python 3.12 venv, removed unused faiss-cpu (summary only: no separate note) |
 | 03 | `fix/agent-isolation-and-async` | Shared mutable state, event loop blocking, sticky routing |
 | 04 | `fix/memory-pipeline-crashes` | Model-vs-dict contracts, return-type honesty, silent failures |
 | 05 | `fix/migrations-and-vector-index` | Alembic chains, squashing, pgvector operators and HNSW, FK cascade |
@@ -44,6 +44,15 @@ One note per branch, in the order the work was done. Each note covers: the conce
 | 38 | `feature/parallel-tools` | Blocking calls in async MCP tools, readers-writer tool scheduler, interval-union tool time |
 | 39 | `feature/hybrid-retrieval` | Retrieval eval with a context budget, parent/child chunks, weighted RRF hybrid search, HTTP timeouts |
 | 40 | `feature/layered-compaction` | View-only L0-L4 history compaction, background summary, atomic JSONB patches, graceful degradation |
+| 41 | `feature/fe-design-tokens` | Design tokens, warm light/dark without flash, computed WCAG contrast, migration by property role, visual tests |
+| 42 | `feature/fe-restyle` | Panel scrolling, reading column, lucide icons with aria-labels, toasts, one focus ring, reduced motion |
+| 43 | `feature/fe-streaming-polish` | Frame-batched deltas, live step checklist (pure reducer), turn_state replay, draft-wiping race |
+| 44 | `feature/fe-composer-turns` | Stop, queue chips, offline notice, follow-the-bottom scroll; reading values out of setState updaters (bug) |
+| 45 | `fix/ws-error-attribution` + `feature/fe-confirmations` | Errors echo their command; approval cards; fake WebSocket server tests |
+| 46 | `fix/quota-503` + `feature/conversation-search` + `feature/fe-states-and-search` | 503 + Retry-After, Postgres FTS search, ⌘K palette, skeletons, drafts, copy fallback |
+| 47 | `fix/db-pool-starvation` + `fix/pipeline-connection-release` | Flaky tests were a pool outage: global cap, explicit pool, release connections during AI calls (120 s → 0.1 s) |
+| 48 | `feature/metrics-daily` + `feature/fe-usage-view` | Usage view: form first, validated chart colour, focusable chart with table view |
+| 49 | `fix/eval-judge-rate-limit` + `feature/background-jobs-switch` | Inconclusive vs failed evals, fallback judge, a blocked test hides regressions, test runs vs daily quotas |
 
 ## Branching workflow
 - `develop-be` is cut from `main`, with the latest feature branch merged in.
