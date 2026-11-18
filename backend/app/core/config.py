@@ -60,6 +60,13 @@ class Settings(BaseSettings):
     LLM_TEMPERATURE: float = 0.1
     LLM_MAX_WORKERS: int = 4
     MAINTENANCE_LLM_MAX_WORKERS: int = 1
+    # Background memory maintenance holds a DB session across slow LLM calls. Cap how
+    # many run at once so they can never take the whole pool from user requests.
+    MAINTENANCE_MAX_CONCURRENT_RUNS: int = 2
+    # Explicit pool: fail in 10s instead of hanging 30s when starved; drop dead connections.
+    DB_POOL_SIZE: int = 10
+    DB_MAX_OVERFLOW: int = 10
+    DB_POOL_TIMEOUT_SECONDS: int = 10
     MAINTENANCE_MAX_COMPARISONS_PER_RUN: int = 6
     MAINTENANCE_MIN_COMPARISONS_FOR_OPTIONAL_STAGES: int = 1
     MAINTENANCE_MIN_COMPARISONS_FOR_PROFILE_REFRESH: int = 1
