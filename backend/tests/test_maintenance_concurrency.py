@@ -36,3 +36,17 @@ async def test_pipelines_across_many_users_share_a_small_pool_of_slots(monkeypat
     await asyncio.gather(*(pipeline.run_memory_maintenance_pipeline(user_id=u, conversation_id=uuid4()) for u in users))
     assert Tracker.peak == settings.MAINTENANCE_MAX_CONCURRENT_RUNS
     assert Tracker.active == 0
+
+
+def test_background_llm_jobs_switch_skips_scheduling(monkeypatch):
+    import asyncio as _asyncio
+    from types import SimpleNamespace
+
+    from app.services.user_profile import user_profile_cache_service as profile
+
+    monkeypatch.setattr(settings, "BACKGROUND_LLM_JOBS_ENABLED", False)
+    created = []
+    monkeypatch.setattr(_asyncio, "create_task", lambda *a, **k: created.append(a))
+    pipeline.schedule_memory_maintenance_pipeline(user_id=uuid4(), conversation_id=uuid4())
+    profile.schedule_profile_snapshot_update(SimpleNamespace(id=uuid4(), user_id=uuid4(), conversation_id=uuid4(), content="hi"))
+    assert created == []  # nothing scheduled, so no LLM tokens spent
