@@ -1,6 +1,6 @@
 """Usage and performance metrics for the signed-in user."""
 
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func
@@ -22,6 +22,28 @@ def percentile(values: list[int], pct: float) -> int | None:
     ordered = sorted(values)
     rank = max(1, round(pct / 100 * len(ordered)))
     return ordered[min(rank, len(ordered)) - 1]
+
+
+def daily_series(turns: list, token_rows: list, days: int, today: date) -> list[dict]:
+    """
+    One entry per day for the last `days` days (oldest first), zero-filled: a chart
+    must never silently skip a day with no data. Days are UTC dates (timestamps are
+    stored in UTC).
+    """
+    series = {
+        (today - timedelta(days=offset)).isoformat(): {"turns": 0, "errors": 0, "tokens": 0}
+        for offset in range(days - 1, -1, -1)
+    }
+    for turn in turns:
+        day = series.get(turn.created_at.date().isoformat())
+        if day is not None:
+            day["turns"] += 1
+            day["errors"] += int(bool(turn.error))
+    for row_day, tokens in token_rows:
+        day = series.get(row_day.isoformat() if hasattr(row_day, "isoformat") else str(row_day))
+        if day is not None:
+            day["tokens"] += int(tokens or 0)
+    return [{"date": key, **values} for key, values in series.items()]
 
 
 @router.get("/turns")
@@ -52,6 +74,12 @@ async def summary(days: int = Query(7, ge=1, le=90), user: User = Depends(get_cu
         .group_by(LlmCall.purpose)
     )).all()
 
+    tokens_by_day = (await db.execute(
+        select(func.date(LlmCall.created_at), func.sum(LlmCall.input_tokens + LlmCall.output_tokens))
+        .where(LlmCall.user_id == user.id, LlmCall.created_at >= since)
+        .group_by(func.date(LlmCall.created_at))
+    )).all()
+
     tool_stats: dict[str, dict] = {}
     for turn in turns:
         for tool in turn.tools or []:
@@ -77,6 +105,7 @@ async def summary(days: int = Query(7, ge=1, le=90), user: User = Depends(get_cu
             "total_p50": percentile(total, 50), "total_p95": percentile(total, 95),
         },
         "agents": agents,
+        "daily": daily_series(turns, tokens_by_day, days, datetime.utcnow().date()),
         "tools": {
             name: {"calls": s["calls"], "failures": s["failures"], "p50_ms": percentile(s["ms"], 50)}
             for name, s in sorted(tool_stats.items(), key=lambda kv: -kv[1]["calls"])
