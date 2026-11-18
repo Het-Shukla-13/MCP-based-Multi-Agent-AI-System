@@ -33,6 +33,8 @@ export default function MessageInput({
   onRemoveQueued,
   onStop,
   queue = [],
+  text,
+  onTextChange,
   isUploading,
   onAttachFiles,
   onClearAttachedFiles,
@@ -42,7 +44,7 @@ export default function MessageInput({
   pinnedAgent,
   onPinAgent,
 }) {
-  const [text, setText] = useState("");
+  const setText = onTextChange; // the text lives in ChatPage (a draft per conversation)
   const [mention, setMention] = useState(null); // {query, start} | null
   const [highlighted, setHighlighted] = useState(0);
   const [format, setFormat] = useState("");

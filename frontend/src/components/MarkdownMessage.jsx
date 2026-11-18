@@ -1,4 +1,6 @@
-import { memo, useState } from "react";
+import { memo } from "react";
+import { Check, Copy } from "lucide-react";
+import { useCopy } from "../hooks/useCopy";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { withToken } from "../lib/api";
@@ -19,22 +21,28 @@ function resolveUrl(url) {
 }
 
 function CodeBlock({ className, children }) {
-  const [copied, setCopied] = useState(false);
+  const [copyState, copy] = useCopy();
   const language = /language-(\w+)/.exec(className || "")?.[1];
   const code = String(children).replace(/\n$/, "");
-  const copy = async () => {
-    await navigator.clipboard.writeText(code);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
-  };
   return (
     <div className="md-code">
       <div className="md-code__bar">
         <span>{language || "code"}</span>
-        <button onClick={copy} type="button">{copied ? "Copied" : "Copy"}</button>
+        <CopyButton label="Copy code" onCopy={() => copy(code)} state={copyState} />
       </div>
       <pre><code className={className}>{code}</code></pre>
     </div>
+  );
+}
+
+/** Copy -> ✓ "Copied" for 1.5s; the label change is announced (aria-live). */
+export function CopyButton({ label, onCopy, state }) {
+  const text = state === "copied" ? "Copied" : state === "failed" ? "Copy failed" : "Copy";
+  return (
+    <button aria-label={state === "idle" ? label : text} className="copy-button" onClick={onCopy} type="button">
+      {state === "copied" ? <Check aria-hidden="true" size={14} /> : <Copy aria-hidden="true" size={14} />}
+      <span aria-live="polite">{text}</span>
+    </button>
   );
 }
 
