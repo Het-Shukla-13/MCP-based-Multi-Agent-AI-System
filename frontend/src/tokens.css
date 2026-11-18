@@ -97,6 +97,11 @@
   --danger-border: #f0c4bd;
 
   --code-bg: #f6f3ee;
+
+  /* Data marks: separate from the UI accent. Validated with the dataviz
+     validator against our surfaces (chroma floor, lightness band, >= 3:1). */
+  --chart-mark: #0b8a7a;
+  --chart-grid: #ece8e1;
   --code-text: #2b2722;
 
   --shadow-sm: 0 1px 2px rgba(40, 32, 20, 0.05);
@@ -147,6 +152,9 @@
   --danger-border: rgba(236, 113, 102, 0.4);
 
   --code-bg: #121211;
+
+  --chart-mark: #2aa694;
+  --chart-grid: #2b2b28;
   --code-text: #e6e3dd;
 
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
@@ -191,6 +199,8 @@
     --danger-soft: rgba(236, 113, 102, 0.14);
     --danger-border: rgba(236, 113, 102, 0.4);
     --code-bg: #121211;
+    --chart-mark: #2aa694;
+    --chart-grid: #2b2b28;
     --code-text: #e6e3dd;
     --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
     --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.35);

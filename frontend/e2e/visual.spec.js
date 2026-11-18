@@ -91,3 +91,15 @@ for (const theme of ["light", "dark"]) {
     await shoot(page, `${testInfo.project.name}-${theme}-confirmation`);
   });
 }
+
+for (const theme of ["light", "dark"]) {
+  test(`@visual usage panel (${theme})`, async ({ page }, testInfo) => {
+    const { mockUsage } = await import("./usageFixture");
+    await mockUsage(page);
+    await page.addInitScript((t) => window.localStorage.setItem("theme", t), theme);
+    await register(page);
+    await page.getByRole("button", { name: "Usage" }).click();
+    await expect(page.locator(".chart-mark").first()).toBeVisible();
+    await shoot(page, `${testInfo.project.name}-${theme}-usage`);
+  });
+}
