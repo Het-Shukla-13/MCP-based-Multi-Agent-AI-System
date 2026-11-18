@@ -55,6 +55,10 @@ class Settings(BaseSettings):
     ROUTER_FALLBACK_MODEL: str | None = "gemini-3.1-flash-lite"
     # Eval judge: a DIFFERENT model family than the agents (limits self-preference bias).
     EVAL_JUDGE_MODEL: str = "openai/gpt-oss-20b"
+    # Used when the main judge is out of quota for longer than a short wait (e.g. the
+    # free tier's tokens-per-day). Groq budgets are per model; NOT a Gemini model,
+    # because the answers being judged come from Gemini agents (self-preference bias).
+    EVAL_JUDGE_FALLBACK_MODEL: str = "openai/gpt-oss-120b"
     GROQ_API_KEY: str | None = None
     GEMINI_API_KEY: str | None = None
     LLM_TEMPERATURE: float = 0.1

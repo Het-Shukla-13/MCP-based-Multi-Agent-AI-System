@@ -40,10 +40,37 @@ def grade_retrieval(context: str, expect: list[str]) -> list[str]:
     return [e for e in expect if " ".join(e.lower().split()) not in haystack]
 
 
+MAX_INCONCLUSIVE_SHARE = 1 / 3  # beyond this a suite's score isn't trustworthy
+
+
+def retry_after_seconds(error: Exception | str) -> float | None:
+    """Provider-suggested wait from a rate-limit error ("try again in 1m2.5s" / "retryDelay: 7s")."""
+    text = str(error)
+    if "429" not in text and "rate limit" not in text.lower() and "RESOURCE_EXHAUSTED" not in text:
+        return None
+    match = re.search(r"try again in (?:(\d+)m)?([\d.]+)s", text, re.I) or re.search(r"retryDelay'?\"?:\s*'?\"?([\d.]+)s", text)
+    if match is None:
+        return 10.0
+    if match.re.pattern.startswith("try again"):
+        return int(match.group(1) or 0) * 60 + float(match.group(2))
+    return float(match.group(1))
+
+
 def summarize(results: list[dict]) -> dict:
-    total = len(results)
-    passed = sum(1 for r in results if r["passed"])
+    """
+    Inconclusive cases (the EVAL infrastructure failed, e.g. the judge was rate
+    limited) are excluded from the score and reported; they never count as a
+    product failure, or a provider outage would look like a regression.
+    """
+    conclusive = [r for r in results if not r.get("inconclusive")]
+    total = len(conclusive)
+    passed = sum(1 for r in conclusive if r["passed"])
     summary = {"cases": total, "passed": passed, "score": round(passed / total, 3) if total else 0.0}
+    inconclusive = len(results) - total
+    if inconclusive:
+        summary["inconclusive"] = inconclusive
+        summary["trustworthy"] = inconclusive / len(results) <= MAX_INCONCLUSIVE_SHARE
+    results = conclusive
     groups = sorted({r["group"] for r in results if r.get("group")})
     if groups:
         summary["by_group"] = {
@@ -51,5 +78,5 @@ def summarize(results: list[dict]) -> dict:
             for g in groups
         }
     if any("context_chars" in r for r in results):
-        summary["avg_context_chars"] = int(sum(r.get("context_chars", 0) for r in results) / total)
+        summary["avg_context_chars"] = int(sum(r.get("context_chars", 0) for r in results) / max(total, 1))
     return summary
