@@ -256,7 +256,9 @@ export default function ChatPage({ user, onLogout }) {
     try {
       const conversation = await createConversation(`New Chat ${conversations.length + 1}`);
 
-      setConversations((current) => [conversation, ...current]);
+      // The initial list load may already contain it (answered after the server
+      // created it): never add the same conversation twice.
+      setConversations((current) => [conversation, ...current.filter((c) => c.id !== conversation.id)]);
       setSelectedConversationId(conversation.id);
       setStatusMessage("New conversation created.", "success");
     } catch (error) {

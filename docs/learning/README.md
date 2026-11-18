@@ -53,6 +53,7 @@ One note per branch, in the order the work was done. Each note covers: the conce
 | 47 | `fix/db-pool-starvation` + `fix/pipeline-connection-release` | Flaky tests were a pool outage: global cap, explicit pool, release connections during AI calls (120 s → 0.1 s) |
 | 48 | `feature/metrics-daily` + `feature/fe-usage-view` | Usage view: form first, validated chart colour, focusable chart with table view |
 | 49 | `fix/eval-judge-rate-limit` + `feature/background-jobs-switch` | Inconclusive vs failed evals, fallback judge, a blocked test hides regressions, test runs vs daily quotas |
+| 50 | `fix/duplicate-conversation` | A rare e2e failure was a real optimistic-update race; deterministic reproduction; idempotent merges |
 
 ## Branching workflow
 - `develop-be` is cut from `main`, with the latest feature branch merged in.
