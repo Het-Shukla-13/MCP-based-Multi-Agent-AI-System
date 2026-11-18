@@ -7,6 +7,10 @@ export default function ChatWindow({
   activeAgent,
   agentStatus,
   agents,
+  composerText,
+  onComposerTextChange,
+  focusMessageId,
+  onFocusMessageDone,
   confirmations,
   onConfirmTool,
   progress,
@@ -71,6 +75,9 @@ export default function ChatWindow({
         agents={agents}
         confirmations={confirmations}
         onConfirmTool={onConfirmTool}
+        focusMessageId={focusMessageId}
+        onFocusMessageDone={onFocusMessageDone}
+        onSuggestion={(text) => onComposerTextChange(text)}
         progress={progress}
         conversation={conversation}
         isLoading={isLoading}
@@ -79,6 +86,8 @@ export default function ChatWindow({
       />
       <MessageInput
         agents={agents}
+        text={composerText}
+        onTextChange={onComposerTextChange}
         connectionState={connectionState}
         queue={queue}
         onRemoveQueued={onRemoveQueued}

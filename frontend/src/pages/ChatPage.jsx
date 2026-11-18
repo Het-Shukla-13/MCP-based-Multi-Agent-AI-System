@@ -17,6 +17,7 @@ import {
 import { DRAFT_ID, useConversationSocket } from "../hooks/useConversationSocket";
 import { useConversationUploads } from "../hooks/useConversationUploads";
 import { Brain, Menu } from "lucide-react";
+import SearchPalette from "../components/SearchPalette";
 import Toaster from "../components/Toaster";
 import { useToasts } from "../hooks/useToasts";
 import { checkFiles } from "../lib/uploads";
@@ -49,6 +50,22 @@ export default function ChatPage({ user, onLogout }) {
   const [isCreatingConversation, setIsCreatingConversation] = useState(false);
   // Transient feedback is a toast (it used to be a banner that pushed the chat down).
   const { toasts, notify: setStatusMessage, dismiss: dismissToast } = useToasts();
+  const [isSearchOpen, setIsSearchOpen] = useState(false);
+  const [focusMessageId, setFocusMessageId] = useState(null); // scroll to a search hit
+  // Unsent text per conversation: switching chats no longer loses what you typed.
+  const [composerDrafts, setComposerDrafts] = useState({});
+
+  // ⌘K (macOS) / Ctrl+K (elsewhere) opens search from anywhere in the app.
+  useEffect(() => {
+    const onKeyDown = (event) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault(); // browsers use Ctrl+K for the address bar
+        setIsSearchOpen(true);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
   const [draftFilesByConversation, setDraftFilesByConversation] = useState({});
   // Agents fetched from /ws/agents on mount
   const [agents, setAgents] = useState([]);
@@ -537,6 +554,7 @@ export default function ChatPage({ user, onLogout }) {
           setSelectedConversationId(id);
           setIsSidebarOpen(false);
         }}
+        onOpenSearch={() => setIsSearchOpen(true)}
         onRenameConversation={handleRenameConversation}
         onDeleteConversation={handleDeleteConversation}
         onExportConversation={handleExportConversation}
@@ -574,6 +592,12 @@ export default function ChatPage({ user, onLogout }) {
           progress={progress}
           confirmations={confirmations}
           onConfirmTool={confirmTool}
+          focusMessageId={focusMessageId}
+          onFocusMessageDone={() => setFocusMessageId(null)}
+          composerText={composerDrafts[selectedConversationId] || ""}
+          onComposerTextChange={(value) =>
+            setComposerDrafts((current) => ({ ...current, [selectedConversationId]: value }))
+          }
           connectionState={connectionState}
           queue={queue}
           onRemoveQueued={removeQueued}
@@ -596,6 +620,18 @@ export default function ChatPage({ user, onLogout }) {
       </main>
       {isMemoryOpen ? <MemoryPanel onClose={() => setIsMemoryOpen(false)} /> : null}
       <Toaster onDismiss={dismissToast} toasts={toasts} />
+      {isSearchOpen ? (
+        <SearchPalette
+          conversations={conversations}
+          onClose={() => setIsSearchOpen(false)}
+          onOpen={(hit) => {
+            setIsSearchOpen(false);
+            setIsSidebarOpen(false);
+            setSelectedConversationId(hit.conversation_id);
+            setFocusMessageId(hit.message_id);
+          }}
+        />
+      ) : null}
     </div>
   );
 }

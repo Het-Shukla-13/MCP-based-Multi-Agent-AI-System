@@ -124,6 +124,12 @@ export async function deleteConversation(conversationId) {
   await api.delete(`/conversations/${conversationId}`);
 }
 
+/** Full-text search over the user's conversations. `signal` cancels a stale request. */
+export async function searchConversations(query, { signal } = {}) {
+  const { data } = await api.get("/conversations/search", { params: { q: query }, signal });
+  return data.results;
+}
+
 export async function fetchMessages(conversationId) {
   return (await api.get("/messages/", { params: { conversation_id: conversationId } })).data;
 }

@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { Download, Pencil, Trash2 } from "lucide-react";
+import { Download, Pencil, Search, Trash2 } from "lucide-react";
 import ThemeToggle from "./ThemeToggle";
 
 function formatConversationDate(value) {
@@ -60,6 +60,8 @@ function ConversationItem({ conversation, isActive, onSelect, onRename, onDelete
   );
 }
 
+const SHORTCUT = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent) ? "⌘K" : "Ctrl K";
+
 export default function Sidebar({
   isOpen,
   user,
@@ -73,6 +75,7 @@ export default function Sidebar({
   onDeleteConversation,
   onExportConversation,
   onImportConversation,
+  onOpenSearch,
   selectedConversationId,
 }) {
   const importRef = useRef(null);
@@ -104,9 +107,19 @@ export default function Sidebar({
         />
       </div>
 
+      <button className="sidebar__search" onClick={onOpenSearch} type="button">
+        <Search aria-hidden="true" size={15} />
+        <span>Search chats</span>
+        <kbd aria-hidden="true">{SHORTCUT}</kbd>
+      </button>
+
       <div className="conversation-list">
         {isConversationListLoading ? (
-          <p className="sidebar__hint">Loading conversations...</p>
+          <div aria-label="Loading conversations" aria-busy="true" className="skeleton-list" role="status">
+            {[0, 1, 2, 3].map((i) => (
+              <div className="skeleton skeleton--row" key={i} />
+            ))}
+          </div>
         ) : conversations.length === 0 ? (
           <p className="sidebar__hint">No conversations yet.</p>
         ) : (
