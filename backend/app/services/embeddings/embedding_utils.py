@@ -44,6 +44,10 @@ MAX_RETRY_WAIT_SECONDS = 60.0
 
 class EmbeddingQuotaExhausted(RuntimeError):
     """The provider's quota will not recover soon (e.g. the free tier's daily limit)."""
+
+    def __init__(self, message: str, retry_after_seconds: float | None = None):
+        super().__init__(message)
+        self.retry_after_seconds = retry_after_seconds
 QUERY_CACHE_SIZE = 256
 
 _client: genai.Client | None = None
@@ -119,7 +123,8 @@ def _embed_batch(texts: list[str], task: EmbedTask) -> list[list[float]]:
                 delay = _retry_delay(exc, attempt)
                 if delay > MAX_RETRY_WAIT_SECONDS:
                     raise EmbeddingQuotaExhausted(
-                        f"Embedding quota exhausted; the provider asks to retry in {delay / 3600:.1f} h."
+                        f"Embedding quota exhausted; the provider asks to retry in {delay / 3600:.1f} h.",
+                        retry_after_seconds=delay,
                     ) from exc
                 logger.warning("Embedding rate-limited; retrying in {}s (attempt {})", delay, attempt + 1)
                 time.sleep(delay)

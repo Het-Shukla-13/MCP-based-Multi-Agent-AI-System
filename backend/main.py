@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from fastapi.openapi.utils import get_openapi
 from app.core.config import settings
+from app.core.errors import register_error_handlers
 from app.core.logging import setup_logging
 from app.core.openapi import normalize_binary_upload_schema
 from app.api.auth import router as auth_router
@@ -30,6 +31,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+register_error_handlers(app)
 app.include_router(auth_router)
 app.include_router(metrics_router)
 app.include_router(ws_router)
