@@ -38,16 +38,31 @@ Branch: `fix/db-pool-starvation` (backend).
   - After the fix, `pg_stat_activity` shows at most **2** "idle in transaction" connections, the cap.
   - The full suite passed **39/39** on two back-to-back runs and two cold-start runs; the third of the first three post-fix runs had one unexplained failure (details lost).
 
-## Still to do (deeper fix)
+## The deeper fix (`fix/pipeline-connection-release`)
 
-The pipeline still holds its connection **inside an open transaction** while waiting for LLM calls. "Idle in transaction" also pins a Postgres snapshot, which delays vacuum.
+The cap bounded the damage; the pipeline still held its connection **inside an open transaction** during every LLM call. "Idle in transaction" also pins a Postgres snapshot, which delays vacuum.
 
-The proper fix is structural:
+- **`app/db/slow_io.py`:** a job opts its session in with `async with AsyncSessionLocal() as db, release_connection_during_slow_io(db):`.
+- **The hook:** the two async choke points for slow calls, `get_llm_response_async` and `embed_text_async`, call `before_slow_io()`. That **commits** the read-only transaction, so the connection returns to the pool; the next query takes a fresh one.
+- **The safety rules:**
+  - Commit, never rollback: a rollback would silently discard **flushed** writes, which don't appear in `db.new`/`db.dirty`.
+  - With **unflushed** pending changes it does nothing (logged).
+  - `expire_on_commit=False` keeps loaded objects usable.
+  - It only acts in the **task that opted in**, because tasks spawned inside the job copy the ContextVar and must not commit someone else's session.
+- **Tests (real Postgres):**
+  - after a read, `before_slow_io()` drops the pool's checked-out count from 1 to 0, and the session still works;
+  - unflushed changes keep the transaction;
+  - a spawned task can't release the session;
+  - nothing happens without the opt-in.
+- **Measured live:** `pg_stat_activity` was sampled every second during the full e2e suite (which triggers many pipelines).
 
-- end the transaction (commit or rollback) before each external call;
-- or split the work into **read → think (no DB) → write** phases, each with a short-lived session.
+| | longest "idle in transaction" |
+|---|---|
+| original bug | ~120 s (12 connections) |
+| with the concurrency cap only | ~23 s (2 connections) |
+| **with connection release** | **0.1 s** |
 
-The cap bounds the damage now; the restructure removes it.
+The suite passed 47/47 during the measurement. **A measurement lesson from the way here:** the first attempt reported "0.0 s" from only 4 samples and no test result. The checkout was on the backend branch, whose copy of the frontend was stale, so the suite never ran. A number from a run you didn't verify isn't evidence.
 
 ## Lessons
 
