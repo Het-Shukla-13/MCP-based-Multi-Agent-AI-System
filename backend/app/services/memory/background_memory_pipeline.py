@@ -27,6 +27,11 @@ from app.services.conversation.conversation_metadata_service import merge_conver
 METADATA_KEYS = ("topics", "entities", "active_goals", "sentiment", "summary_hint")
 
 _USER_LOCKS: dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
+# Global cap across ALL users. A per-user lock alone allowed one pipeline per active
+# user in parallel; each holds a DB connection (inside an open transaction) across
+# slow LLM calls, and a burst of users exhausted the pool: register/login/send then
+# hung waiting for a connection while /health (no DB) still looked fine.
+_MAINTENANCE_SLOTS = asyncio.Semaphore(settings.MAINTENANCE_MAX_CONCURRENT_RUNS)
 _USER_TASKS: dict[str, asyncio.Task] = {}
 _USER_PENDING_CONVERSATIONS: dict[str, list[UUID]] = defaultdict(list)
 
@@ -55,7 +60,7 @@ async def run_memory_maintenance_pipeline(
 ) -> None:
     user_lock = _USER_LOCKS[str(user_id)]
 
-    async with user_lock:
+    async with user_lock, _MAINTENANCE_SLOTS:
         async with AsyncSessionLocal() as db:
             try:
                 from app.services.conversation.history_service import fetch_conversation_history
