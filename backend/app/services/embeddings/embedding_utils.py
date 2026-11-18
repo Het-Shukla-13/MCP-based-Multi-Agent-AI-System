@@ -26,6 +26,7 @@ from collections import OrderedDict
 from typing import Literal
 
 import numpy as np
+from app.db.slow_io import before_slow_io
 from google import genai
 from google.genai import types
 from loguru import logger
@@ -160,4 +161,5 @@ def embed_text(text: str, task: EmbedTask = "document") -> list[float]:
 
 async def embed_text_async(text: str, task: EmbedTask = "document") -> list[float]:
     """Non-blocking for the event loop (network call + possible rate-limit wait in a thread)."""
+    await before_slow_io()  # don't hold a DB connection while waiting on the API
     return await asyncio.to_thread(embed_text, text, task)
