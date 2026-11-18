@@ -16,8 +16,9 @@ import {
 } from "../lib/api";
 import { DRAFT_ID, useConversationSocket } from "../hooks/useConversationSocket";
 import { useConversationUploads } from "../hooks/useConversationUploads";
-import { Brain, Menu } from "lucide-react";
+import { Brain, ChartColumn, Menu } from "lucide-react";
 import SearchPalette from "../components/SearchPalette";
+import UsagePanel from "../components/usage/UsagePanel";
 import Toaster from "../components/Toaster";
 import { useToasts } from "../hooks/useToasts";
 import { checkFiles } from "../lib/uploads";
@@ -37,6 +38,8 @@ export default function ChatPage({ user, onLogout }) {
   // so a pick in one chat silently disabled routing in every chat).
   const [pinnedAgentByConversation, setPinnedAgentByConversation] = useState({});
   const [isMemoryOpen, setIsMemoryOpen] = useState(false);
+  const [isUsageOpen, setIsUsageOpen] = useState(false);
+  const closeUsage = useCallback(() => setIsUsageOpen(false), []); // stable: the panel's effect depends on it
   // Mobile only: the conversation list is an off-canvas drawer (CSS hides the
   // toggle and keeps the sidebar visible on wide screens).
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
@@ -582,6 +585,10 @@ export default function ChatPage({ user, onLogout }) {
               <Brain aria-hidden="true" size={16} />
               Memory
             </button>
+            <button className="secondary-button button-with-icon" onClick={() => setIsUsageOpen(true)} type="button">
+              <ChartColumn aria-hidden="true" size={16} />
+              Usage
+            </button>
             <span className={`status-pill status-pill--${connectionState}`}>{connectionState}</span>
           </div>
         </header>
@@ -619,6 +626,7 @@ export default function ChatPage({ user, onLogout }) {
         />
       </main>
       {isMemoryOpen ? <MemoryPanel onClose={() => setIsMemoryOpen(false)} /> : null}
+      {isUsageOpen ? <UsagePanel agents={agents} onClose={closeUsage} /> : null}
       <Toaster onDismiss={dismissToast} toasts={toasts} />
       {isSearchOpen ? (
         <SearchPalette

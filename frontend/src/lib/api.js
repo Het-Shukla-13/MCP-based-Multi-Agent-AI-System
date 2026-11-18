@@ -130,6 +130,15 @@ export async function searchConversations(query, { signal } = {}) {
   return data.results;
 }
 
+/** Usage summary for the signed-in user (latency, tokens, tools, a daily series). */
+export async function fetchUsageSummary(days, { signal } = {}) {
+  return (await api.get("/metrics/summary", { params: { days }, signal })).data;
+}
+
+export async function fetchRecentTurns(limit = 20, { signal } = {}) {
+  return (await api.get("/metrics/turns", { params: { limit }, signal })).data;
+}
+
 export async function fetchMessages(conversationId) {
   return (await api.get("/messages/", { params: { conversation_id: conversationId } })).data;
 }
