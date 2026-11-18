@@ -1,7 +1,7 @@
 from sqlmodel import SQLModel, Field, Relationship
 from typing import List, Optional, TYPE_CHECKING
 from datetime import datetime
-from sqlalchemy import Column, String, Integer, ForeignKey, DateTime
+from sqlalchemy import Column, DateTime, ForeignKey, Index, Integer, String, text
 from uuid import uuid4, UUID
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 
@@ -12,6 +12,11 @@ if TYPE_CHECKING:
 
 class Message(SQLModel, table=True):
     __tablename__ = "message"
+    __table_args__ = (
+        # Full-text search over what was said (conversation search, ⌘K in the UI).
+        # An EXPRESSION index: queries must use exactly to_tsvector('english', content).
+        Index("message_content_fts_idx", text("to_tsvector('english', content)"), postgresql_using="gin"),
+    )
 
     id: UUID = Field(default_factory=uuid4, sa_column=Column(PGUUID(as_uuid=True), unique=True, nullable=False, primary_key=True, index=True))
     conversation_id: UUID = Field(sa_column=Column(PGUUID(as_uuid=True), ForeignKey("conversation.id"), nullable=False))

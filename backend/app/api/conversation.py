@@ -14,6 +14,7 @@ from app.schemas.conversation import (
     ConversationUpdateRequest,
 )
 from app.schemas.import_convo import ImportConversationRequest
+from app.services.conversation.search_service import search_conversations
 from app.services.conversation.transfer_service import export_conversation, import_messages
 
 router = APIRouter(prefix="/conversations", tags=["Conversations"])
@@ -22,6 +23,13 @@ router = APIRouter(prefix="/conversations", tags=["Conversations"])
 @router.post("/", response_model=ConversationRead, status_code=201)
 async def create(payload: ConversationCreateRequest, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     return await create_conversation(db, ConversationCreate(title=payload.title, user_id=user.id))
+
+
+# Declared before "/{conversation_id}" routes: otherwise "search" is parsed as a UUID (422).
+@router.get("/search")
+async def search(q: str = "", user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    """Full-text search over the user's own messages + title matches (one hit per conversation)."""
+    return {"results": await search_conversations(db, user.id, q)}
 
 
 @router.get("/", response_model=list[ConversationRead])
