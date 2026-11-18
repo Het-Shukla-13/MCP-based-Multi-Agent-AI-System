@@ -8,6 +8,8 @@ from time import perf_counter
 
 from loguru import logger
 from openai import OpenAI
+
+from app.db.slow_io import before_slow_io
 from groq import Groq
 
 from app.core.config import settings
@@ -213,6 +215,7 @@ async def get_llm_response_async(
     purpose: str = "unspecified",
     response_format: dict | None = None,
 ):
+    await before_slow_io()  # don't hold a DB connection while waiting on the model
     loop = asyncio.get_running_loop()
     executor = _resolve_executor_for_purpose(purpose)
     # run_in_executor does NOT carry ContextVars into the worker thread (unlike
