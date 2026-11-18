@@ -7,6 +7,7 @@ from loguru import logger
 
 from app.core.config import settings
 from app.db.database import AsyncSessionLocal
+from app.db.slow_io import release_connection_during_slow_io
 from app.crud.conversation import get_conversation, patch_conversation_metadata
 from app.services.memory.memory_services import refresh_rolling_summary
 from app.services.memory.ltm_service import ComparisonBudget
@@ -61,7 +62,9 @@ async def run_memory_maintenance_pipeline(
     user_lock = _USER_LOCKS[str(user_id)]
 
     async with user_lock, _MAINTENANCE_SLOTS:
-        async with AsyncSessionLocal() as db:
+        # The session gives its connection back during every LLM/embedding call
+        # (app/db/slow_io.py), instead of sitting "idle in transaction" for minutes.
+        async with AsyncSessionLocal() as db, release_connection_during_slow_io(db):
             try:
                 from app.services.conversation.history_service import fetch_conversation_history
 
