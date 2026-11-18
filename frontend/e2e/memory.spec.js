@@ -19,7 +19,7 @@ test("add, search, edit, deactivate and delete a memory; profile follows", async
   await expect(page.locator(".memory-row__content")).toHaveText(["I prefer TypeScript for frontend projects."], EMBEDDING_STEP);
 
   await page.getByPlaceholder("Search by meaning").fill("which language for web UIs?");
-  await page.getByRole("button", { name: "Search" }).click();
+  await panel.getByRole("button", { name: "Search", exact: true }).click(); // scoped: the sidebar has "Search chats" too
   await expect(page.locator(".memory-row__meta").first()).toContainText("distance", EMBEDDING_STEP);
   await page.getByPlaceholder("Search by meaning").fill("");
 
